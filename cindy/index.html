@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Cindy AMRAP</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: #151923;
+      --panel-2: #1c2230;
+      --line: #262d3c;
+      --fg: #f3f5f9;
+      --muted: #8a93a6;
+      --accent: #4f8cff;
+      --green: #3ddc84;
+      --amber: #f5b942;
+      --red: #e5484d;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font);
+    }
+    [hidden] { display: none !important; }
+
+    /* 스크롤·확대·바운스 전부 차단. 스크롤은 [data-scroll] 영역 안에서만 허용 */
+    body {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      touch-action: none;
+      overscroll-behavior: none;
+      display: flex;
+      flex-direction: column;
+      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      transition: background-color 0.35s ease;
+    }
+    [data-scroll] {
+      overflow-y: auto;
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+
+    button {
+      font-family: inherit;
+      border: none;
+      border-radius: 14px;
+      color: var(--fg);
+      background: var(--panel-2);
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: transform 0.08s ease, background-color 0.2s ease, opacity 0.2s ease;
+    }
+    button:active { transform: scale(0.96); }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    /* ---------- 탭 플래시 ---------- */
+    #flash {
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 50;
+    }
+    #flash.on { animation: flash 0.16s ease-out forwards; }
+    @keyframes flash {
+      0%   { opacity: 0.32; }
+      100% { opacity: 0; }
+    }
+
+    /* ---------- 상단: 타이머 ---------- */
+    header {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: 56px 1fr 56px;
+      align-items: center;
+      padding: 10px 14px 0;
+      min-height: 76px;
+    }
+    #time {
+      text-align: center;
+      font-family: var(--mono);
+      font-size: clamp(44px, 14vw, 60px);
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0.02em;
+      font-variant-numeric: tabular-nums;
+      transition: color 0.2s ease;
+    }
+    body[data-state="running"] #time.warn { color: var(--amber); }
+    body[data-state="running"] #time.crit { color: var(--red); }
+    body[data-state="paused"] #time { color: var(--muted); }
+    .icon-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      justify-self: center;
+    }
+    .icon-btn svg { width: 22px; height: 22px; fill: currentColor; }
+    #iconPlay { display: none; }
+    body[data-state="paused"] #iconPause { display: none; }
+    body[data-state="paused"] #iconPlay { display: block; }
+    #pauseBtn { background: var(--panel-2); }
+    body[data-state="paused"] #pauseBtn { background: var(--amber); color: #1a1400; }
+
+    /* ---------- 중앙: 라운드 ---------- */
+    /* 가운데(라운드·결과·기록)는 화면이 작거나 글꼴이 크면 스크롤되고, 하단 버튼은 항상 고정 */
+    #mid {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      touch-action: pan-y;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
+    }
+    body[data-state="running"] #mid,
+    body[data-state="paused"] #mid { overflow: hidden; touch-action: none; }
+    main {
+      flex: 1 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .rounds-label {
+      font-size: 0.9rem;
+      letter-spacing: 0.3em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    #rounds {
+      font-size: min(clamp(120px, 44vw, 210px), 30vh);
+      font-weight: 800;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      transition: transform 0.08s ease;
+    }
+    #rounds.bump { transform: scale(1.06); }
+    #hint {
+      margin-top: 10px;
+      padding: 0 28px;
+      text-align: center;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: var(--muted);
+      min-height: 2.6em;
+    }
+    #pausedBadge {
+      position: absolute;
+      top: 8px;
+      background: var(--amber);
+      color: #1a1400;
+      font-weight: 700;
+      font-size: 0.9rem;
+      padding: 6px 14px;
+      border-radius: 999px;
+    }
+
+    /* ---------- 결과 카드 ---------- */
+    #result {
+      flex: 0 0 auto;
+      margin: 0 16px 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 16px;
+    }
+    #result .summary {
+      font-size: 1rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    #result .summary b {
+      color: var(--fg);
+      font-size: 1.5rem;
+      font-variant-numeric: tabular-nums;
+    }
+    #result .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    #result .row + .row { margin-top: 6px; }
+    #result .lbl { font-size: 0.95rem; color: var(--muted); }
+    .stepper {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .stepper button {
+      width: 44px;
+      height: 42px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      border-radius: 12px;
+    }
+    .stepper input {
+      width: 64px;
+      height: 42px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 1.4rem;
+      font-weight: 700;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--fg);
+      outline: none;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    .stepper input:focus { border-color: var(--accent); }
+    #result .saved {
+      margin-top: 8px;
+      font-size: 0.78rem;
+      color: var(--green);
+    }
+
+    /* ---------- 이력 ---------- */
+    #history {
+      margin: 0 16px 10px;
+      flex: 0 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      display: flex;
+      flex-direction: column;
+    }
+    #history h2 {
+      margin: 0;
+      padding: 12px 16px 8px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      display: flex;
+      justify-content: space-between;
+    }
+    #historyList {
+      list-style: none;
+      margin: 0;
+      padding: 0 8px 8px;
+    }
+    #historyList li {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 8px 10px 12px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+    }
+    #historyList li + li { border-top: 1px solid var(--line); border-radius: 0; }
+    #historyList li.best { background: rgba(245, 185, 66, 0.12); border-radius: 12px; }
+    #historyList li.best + li { border-top: none; }
+    #historyList .when { color: var(--muted); font-size: 0.8rem; }
+    #historyList .score {
+      font-family: var(--mono);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    #historyList li.best .score { color: var(--amber); }
+    #historyList .del {
+      width: 40px;
+      height: 36px;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 1.1rem;
+    }
+    #historyList .del.confirm {
+      background: #b3262c;
+      color: #fff;
+      font-size: 0.88rem;
+      font-weight: 800;
+      width: auto;
+      padding: 0 10px;
+    }
+    #historyEmpty {
+      padding: 6px 16px 16px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    /* ---------- 하단 버튼 ---------- */
+    footer {
+      flex: 0 0 auto;
+      padding: 12px 16px 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-items: end;
+    }
+    #startBtn {
+      grid-column: 1 / -1;
+      height: 68px;
+      font-size: 1.35rem;
+      font-weight: 800;
+      background: var(--accent);
+      color: #fff;
+    }
+    #minusBtn {
+      height: 52px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      background: var(--panel-2);
+      color: var(--fg);
+    }
+    #resetBtn {
+      height: 52px;
+      position: relative;
+      overflow: hidden;
+      font-size: 0.95rem;
+      font-weight: 700;
+      background: var(--panel-2);
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.15;
+    }
+    #resetBtn small { font-size: 0.72rem; font-weight: 500; }
+    #resetBtn .fill {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 0%;
+      background: var(--red);
+      opacity: 0.55;
+      pointer-events: none;
+    }
+    #resetBtn.holding { color: #fff; }
+    #resetBtn.holding .fill { transition: width 2s linear; width: 100%; }
+    #resetBtn span, #resetBtn small { position: relative; }
+
+    /* ---------- 설정 모달 ---------- */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 100;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .sheet {
+      width: 100%;
+      max-width: 480px;
+      background: var(--panel);
+      border-radius: 22px 22px 0 0;
+      padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--line);
+    }
+    .sheet h2 { margin: 0 0 14px; font-size: 1.05rem; }
+    .field {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .field label { color: var(--muted); font-size: 0.95rem; }
+    .field .stepper input { width: 72px; }
+    .presets {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .presets button {
+      height: 44px;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .presets button.active { background: var(--accent); color: #0b0d12; }
+    #closeSettings {
+      width: 100%;
+      height: 54px;
+      font-size: 1.1rem;
+      font-weight: 800;
+      background: var(--accent);
+      color: #0b0d12;
+    }
+    .note {
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 0 0 14px;
+    }
+
+    /* ---------- 상태별 표시 ---------- */
+    /* 헤더 버튼은 visibility로 숨겨 3열 그리드가 무너지지 않게 한다 */
+    body[data-state="idle"] #pauseBtn,
+    body[data-state="running"] #settingsBtn,
+    body[data-state="paused"] #settingsBtn,
+    body[data-state="done"] #pauseBtn { visibility: hidden; pointer-events: none; }
+
+    body[data-state="idle"] #pausedBadge,
+    body[data-state="idle"] #minusBtn,
+    body[data-state="idle"] #resetBtn,
+    body[data-state="idle"] #result { display: none; }
+
+    body[data-state="running"] #pausedBadge,
+    body[data-state="running"] #startBtn,
+    body[data-state="running"] #result,
+    body[data-state="running"] #history { display: none; }
+
+    body[data-state="paused"] #startBtn,
+    body[data-state="paused"] #result,
+    body[data-state="paused"] #history { display: none; }
+
+    body[data-state="done"] #pausedBadge,
+    body[data-state="done"] #startBtn,
+    body[data-state="done"] #minusBtn,
+    body[data-state="done"] #hint { display: none; }
+    body[data-state="done"] #resetBtn { grid-column: 1 / -1; height: 60px; }
+    body[data-state="done"] main { flex: 0 0 auto; padding: 4px 0 8px; }
+    body[data-state="done"] #rounds { font-size: min(clamp(72px, 24vw, 120px), 16vh); }
+    body[data-state="done"] .rounds-label { color: #fff; }
+    #result.gone .row { opacity: 0.35; pointer-events: none; }
+    #result.gone .saved { color: var(--amber); }
+    #result .saved.warn { color: var(--amber); }
+
+    /* 종료: 배경이 붉게 바뀌고 잠시 깜빡임 */
+    body[data-state="done"] {
+      background: #5a1a1f;
+      animation: doneFlash 0.6s ease-in-out 5 alternate;
+    }
+    @keyframes doneFlash {
+      from { background-color: #5a1a1f; }
+      to   { background-color: #c0303a; }
+    }
+    body[data-state="done"] #time { color: #ffb4b8; }
+    body[data-state="done"] #history,
+    body[data-state="done"] #result { background: rgba(0, 0, 0, 0.35); border-color: rgba(255,255,255,0.12); }
+    body[data-state="done"] #resetBtn { background: rgba(255,255,255,0.14); color: #fff; }
+
+    @media (prefers-reduced-motion: reduce) {
+      body[data-state="done"] { animation: none; }
+      #flash.on { animation: none; opacity: 0.22; }
+    }
+
+    /* 키 큰 화면(태블릿/PC)에서 가운데 정렬 */
+    @media (min-width: 600px) {
+      header, main, #result, #history, footer { width: 100%; max-width: 480px; margin-left: auto; margin-right: auto; }
+    }
+  </style>
+</head>
+<body data-state="idle">
+  <div id="flash"></div>
+
+  <header data-nocount>
+    <button id="settingsBtn" class="icon-btn" data-nocount aria-label="설정">
+      <svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 .1-1 7.6 7.6 0 0 0-.1-1l2.1-1.6a.5.5 0 0 0 .1-.7l-2-3.4a.5.5 0 0 0-.6-.2l-2.5 1a7.3 7.3 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.4l-.4 2.7a7.3 7.3 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.4a.5.5 0 0 0 .1.7L4.5 11a7.6 7.6 0 0 0 0 2l-2.1 1.6a.5.5 0 0 0-.1.7l2 3.4c.1.2.4.3.6.2l2.5-1a7.3 7.3 0 0 0 1.7 1l.4 2.6c0 .3.2.5.5.5h4c.2 0 .5-.2.5-.4l.4-2.7a7.3 7.3 0 0 0 1.7-1l2.5 1c.2.1.5 0 .6-.2l2-3.4a.5.5 0 0 0-.1-.7L19.4 13ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg>
+    </button>
+    <div id="time" role="timer" aria-live="off">20:00</div>
+    <button id="pauseBtn" class="icon-btn" data-nocount aria-label="일시정지">
+      <svg id="iconPause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+      <svg id="iconPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
+  </header>
+
+  <div id="mid" data-scroll>
+  <main>
+    <div id="pausedBadge">일시정지 · 탭 잠김</div>
+    <div class="rounds-label">ROUNDS</div>
+    <div id="rounds">0</div>
+    <div id="hint">시작을 누른 뒤 화면 아무 곳이나 탭하면 라운드가 올라갑니다</div>
+  </main>
+
+  <section id="result" data-nocount>
+    <div class="summary"><b id="finalRounds">0</b> 라운드 + <b id="finalReps">0</b></div>
+    <div class="row">
+      <span class="lbl">라운드</span>
+      <div class="stepper">
+        <button id="roundsMinus" type="button" aria-label="라운드 −1">−</button>
+        <input id="roundsInput" type="number" inputmode="numeric" min="0" max="999" value="0" aria-label="최종 라운드 수">
+        <button id="roundsPlus" type="button" aria-label="라운드 +1">+</button>
+      </div>
+    </div>
+    <div class="row">
+      <span class="lbl">추가 횟수</span>
+      <div class="stepper">
+        <button id="repsMinus" type="button" aria-label="추가 횟수 −1">−</button>
+        <input id="repsInput" type="number" inputmode="numeric" min="0" max="999" value="0" aria-label="마지막 부분 라운드 추가 횟수">
+        <button id="repsPlus" type="button" aria-label="추가 횟수 +1">+</button>
+      </div>
+    </div>
+    <div class="saved" id="savedNote">기록이 저장되었습니다. 마지막 부분 라운드의 횟수를 입력하세요.</div>
+  </section>
+
+  <section id="history" data-nocount>
+    <h2><span>기록</span><span id="historyCount"></span></h2>
+    <ul id="historyList"></ul>
+    <div id="historyEmpty">아직 기록이 없습니다. 첫 Cindy를 시작해 보세요.</div>
+  </section>
+  </div>
+
+  <footer>
+    <button id="startBtn" data-nocount type="button">시작</button>
+    <button id="minusBtn" data-nocount type="button" aria-label="라운드 되돌리기">−1</button>
+    <button id="resetBtn" data-nocount type="button">
+      <div class="fill"></div>
+      <span id="resetLabel">리셋</span>
+      <small>2초 길게</small>
+    </button>
+  </footer>
+
+  <div id="settings" class="modal" data-nocount hidden>
+    <div class="sheet">
+      <h2>설정</h2>
+      <div class="field">
+        <label for="minutesInput">운동 시간 (분)</label>
+        <div class="stepper">
+          <button id="minMinus" type="button" aria-label="1분 줄이기">−</button>
+          <input id="minutesInput" type="number" inputmode="numeric" min="1" max="99" value="20">
+          <button id="minPlus" type="button" aria-label="1분 늘리기">+</button>
+        </div>
+      </div>
+      <div class="presets" id="presets">
+        <button type="button" data-min="10">10분</button>
+        <button type="button" data-min="15">15분</button>
+        <button type="button" data-min="20">20분</button>
+        <button type="button" data-min="30">30분</button>
+      </div>
+      <p class="note">Cindy: 5 풀업 · 10 푸시업 · 15 스쿼트, 20분 AMRAP. 남은 1분에 알림음, 마지막 10초는 매초 신호음이 울립니다.</p>
+      <button id="closeSettings" type="button">확인</button>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // ---------- DOM ----------
+      var $ = function (id) { return document.getElementById(id); };
+      var body = document.body;
+      var timeEl = $('time');
+      var roundsEl = $('rounds');
+      var hintEl = $('hint');
+      var flashEl = $('flash');
+      var startBtn = $('startBtn');
+      var pauseBtn = $('pauseBtn');
+      var minusBtn = $('minusBtn');
+      var resetBtn = $('resetBtn');
+      var resetLabel = $('resetLabel');
+      var settingsBtn = $('settingsBtn');
+      var settingsEl = $('settings');
+      var minutesInput = $('minutesInput');
+      var presetsEl = $('presets');
+      var finalRounds = $('finalRounds');
+      var finalReps = $('finalReps');
+      var roundsInput = $('roundsInput');
+      var repsInput = $('repsInput');
+      var historyList = $('historyList');
+      var historyEmpty = $('historyEmpty');
+      var historyCount = $('historyCount');
+
+      // ---------- 상수 ----------
+      var KEY_MIN = 'cindy-amrap-minutes';
+      var KEY_REC = 'cindy-amrap-records';
+      var KEY_PENDING = 'cindy-amrap-pending';   // 완료 후 아직 횟수를 적는 중인 기록 id
+      var TAP_DEBOUNCE_MS = 300;
+      var RESET_HOLD_MS = 2000;
+      var TICK_MS = 50;
+      var MAX_RECORDS = 500;
+      var DONE_WAKE_GRACE_MS = 3 * 60 * 1000;
+
+      // ---------- 상태 ----------
+      var state = 'idle';          // idle | running | paused | done
+      var minutes = 20;
+      var runMinutes = 20;         // 이번 운동에 실제 적용된 시간 (실행 중 설정이 바뀌어도 기록은 이 값)
+      var totalMs = minutes * 60000;
+      var remainingMs = totalMs;
+      var endAt = 0;               // Date.now() 기준 종료 시각 (절전 중에도 흐르는 벽시계)
+      var lastSec = null;          // 마지막으로 렌더한 남은 초
+      var rounds = 0;
+      var lastTapAt = -Infinity;   // performance.now() 기준 (디바운스용)
+      var tickId = null;
+      var wakeLock = null;
+      var wakeReleaseTimer = null;
+      var wakePending = false;
+      var resultEl = $('result');
+      var savedNote = $('savedNote');
+      var audioCtx = null;
+      var cues = [];               // 오디오 클록에 미리 예약한 알림음 노드
+      var pendingVibe = null;      // 화면이 숨겨진 상태에서 놓친 진동
+      var records = [];
+      var currentRecordId = null;
+
+      // ---------- 저장소 ----------
+      function loadMinutes() {
+        try {
+          var v = parseInt(localStorage.getItem(KEY_MIN), 10);
+          if (v >= 1 && v <= 99) minutes = v;
+        } catch (e) {}
+      }
+      function saveMinutes() {
+        try { localStorage.setItem(KEY_MIN, String(minutes)); } catch (e) {}
+      }
+      function loadRecords() {
+        try {
+          var arr = JSON.parse(localStorage.getItem(KEY_REC) || '[]');
+          if (Array.isArray(arr)) {
+            records = arr.filter(function (r) {
+              return r && typeof r.id === 'number' && typeof r.rounds === 'number';
+            });
+          }
+        } catch (e) { records = []; }
+      }
+      function saveRecords() {
+        if (records.length > MAX_RECORDS) records.length = MAX_RECORDS;
+        try { localStorage.setItem(KEY_REC, JSON.stringify(records)); return true; } catch (e) { return false; }
+      }
+      function savePending(id) {
+        try {
+          if (id === null) localStorage.removeItem(KEY_PENDING);
+          else localStorage.setItem(KEY_PENDING, String(id));
+        } catch (e) {}
+      }
+      function loadPending() {
+        try {
+          var v = parseInt(localStorage.getItem(KEY_PENDING), 10);
+          return isNaN(v) ? null : v;
+        } catch (e) { return null; }
+      }
+
+      // ---------- 렌더 ----------
+      function pad(n) { return (n < 10 ? '0' : '') + n; }
+      function fmt(ms) {
+        var s = Math.max(0, Math.ceil(ms / 1000));
+        return pad(Math.floor(s / 60)) + ':' + pad(s % 60);
+      }
+      function renderTime(ms) {
+        var text = fmt(ms);
+        if (timeEl.textContent !== text) timeEl.textContent = text;
+        var s = Math.ceil(ms / 1000);
+        timeEl.classList.toggle('warn', s <= 60 && s > 10);
+        timeEl.classList.toggle('crit', s <= 10);
+      }
+      function renderRounds() {
+        roundsEl.textContent = rounds;
+      }
+      function setState(next) {
+        state = next;
+        body.setAttribute('data-state', next);
+        pauseBtn.setAttribute('aria-label', next === 'paused' ? '재개' : '일시정지');
+        resetLabel.textContent = (next === 'done') ? '새 운동' : '리셋';
+        switch (next) {
+          case 'idle':
+            hintEl.textContent = '시작을 누른 뒤 화면 아무 곳이나 탭하면 라운드가 올라갑니다';
+            document.title = 'Cindy AMRAP';
+            break;
+          case 'running':
+            hintEl.textContent = '화면 아무 곳이나 탭 = 라운드 +1';
+            break;
+          case 'paused':
+            hintEl.textContent = '재개하려면 오른쪽 위 버튼을 누르세요';
+            break;
+          case 'done':
+            document.title = '완료 ' + rounds + 'R · Cindy AMRAP';
+            break;
+        }
+      }
+
+      // ---------- 타이머 ----------
+      function timeLeft() { return endAt - Date.now(); }
+
+      function tick() {
+        if (state !== 'running') return;
+        var left = timeLeft();
+        if (left <= 0) { finish(); return; }
+        var sec = Math.ceil(left / 1000);
+        if (sec !== lastSec) {
+          var prev = lastSec;
+          lastSec = sec;
+          renderTime(left);
+          document.title = fmt(left) + ' · ' + rounds + 'R';
+          // 소리는 오디오 클록에 예약되어 있으므로 여기서는 진동만 (소리 없는 기기 대비)
+          if (prev !== null) {
+            if (prev > 60 && sec <= 60) vibrate([150, 80, 150]);
+            else if (sec >= 1 && sec <= 10) vibrate(40);
+          }
+        }
+      }
+      function startTicking() {
+        stopTicking();
+        tick();
+        if (state === 'running') tickId = setInterval(tick, TICK_MS);
+      }
+      function stopTicking() {
+        if (tickId !== null) { clearInterval(tickId); tickId = null; }
+      }
+
+      function start() {
+        if (state !== 'idle') return;
+        settingsEl.hidden = true;
+        ensureAudio();
+        runMinutes = minutes;
+        totalMs = minutes * 60000;
+        remainingMs = totalMs;
+        rounds = 0;
+        lastSec = null;
+        lastTapAt = -Infinity;
+        renderRounds();
+        endAt = Date.now() + remainingMs;
+        setState('running');
+        sfxStart();
+        scheduleCues();
+        startTicking();
+        requestWakeLock();
+      }
+      function pause() {
+        if (state !== 'running') return;
+        var left = timeLeft();
+        if (left <= 0) { finish(); return; }
+        remainingMs = left;
+        stopTicking();
+        cancelCues();
+        setState('paused');
+        renderTime(remainingMs);
+        // 일시정지 중에도 화면은 켜 둔다 (재개 버튼을 바로 누를 수 있도록)
+      }
+      function resume() {
+        if (state !== 'paused') return;
+        ensureAudio();
+        endAt = Date.now() + remainingMs;
+        setState('running');
+        scheduleCues();
+        startTicking();
+        requestWakeLock();
+      }
+      function finish() {
+        if (state !== 'running') return;
+        stopTicking();
+        var armed = cues.length > 0;   // 종료음이 이미 예약되어 있으면 다시 울리지 않음
+        cues = [];
+        remainingMs = 0;
+        lastSec = 0;
+        renderTime(0);
+        currentRecordId = addRecord(rounds);
+        savePending(currentRecordId);
+        showResultCard();
+        setState('done');
+        renderHistory();
+        if (!armed) sfxFinish();
+        if (!vibrate([400, 120, 400, 120, 800])) pendingVibe = [400, 120, 400, 120, 800];
+        scheduleWakeRelease(DONE_WAKE_GRACE_MS);
+      }
+      function reset() {
+        stopTicking();
+        cancelCues();
+        totalMs = minutes * 60000;
+        remainingMs = totalMs;
+        rounds = 0;
+        lastSec = null;
+        currentRecordId = null;
+        savePending(null);
+        pendingVibe = null;
+        renderRounds();
+        renderTime(remainingMs);
+        timeEl.classList.remove('warn', 'crit');
+        setState('idle');
+        renderHistory();
+        releaseWakeLock();
+      }
+
+      // ---------- 라운드 카운터 ----------
+      function addRound(now) {
+        if (state !== 'running') return;
+        if (now - lastTapAt < TAP_DEBOUNCE_MS) return;
+        lastTapAt = now;
+        rounds += 1;
+        renderRounds();
+        roundsEl.classList.remove('bump');
+        void roundsEl.offsetWidth;
+        roundsEl.classList.add('bump');
+        setTimeout(function () { roundsEl.classList.remove('bump'); }, 90);
+        flash();
+        sfxTap();
+        vibrate(18);
+      }
+      function undoRound() {
+        if (state !== 'running' && state !== 'paused') return;
+        if (rounds <= 0) return;
+        rounds -= 1;
+        renderRounds();
+        sfxUndo();
+      }
+      var flashTimer = null;
+      function flash() {
+        flashEl.classList.remove('on');
+        void flashEl.offsetWidth;
+        flashEl.classList.add('on');
+        if (flashTimer) clearTimeout(flashTimer);
+        flashTimer = setTimeout(function () { flashEl.classList.remove('on'); flashTimer = null; }, 200);
+      }
+
+      // 화면 전체 탭: 컨트롤(data-nocount) 위가 아니면 라운드 +1
+      document.addEventListener('pointerdown', function (e) {
+        if (state !== 'running') return;
+        if (!e.isPrimary) return;
+        if (e.target && e.target.closest && e.target.closest('[data-nocount]')) return;
+        addRound(performance.now());
+      }, { passive: true });
+
+      // ---------- 버튼 ----------
+      startBtn.addEventListener('click', start);
+      pauseBtn.addEventListener('click', function () {
+        if (state === 'running') pause();
+        else if (state === 'paused') resume();
+      });
+      minusBtn.addEventListener('click', undoRound);
+
+      // 리셋: 2초 길게 누르기
+      var holdTimer = null;
+      function holdStart(e) {
+        if (holdTimer !== null) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        resetBtn.classList.add('holding');
+        try { resetBtn.setPointerCapture(e.pointerId); } catch (err) {}
+        holdTimer = setTimeout(function () {
+          holdTimer = null;
+          resetBtn.classList.remove('holding');
+          vibrate(60);
+          reset();
+        }, RESET_HOLD_MS);
+      }
+      function holdCancel() {
+        if (holdTimer !== null) { clearTimeout(holdTimer); holdTimer = null; }
+        resetBtn.classList.remove('holding');
+      }
+      resetBtn.addEventListener('pointerdown', holdStart);
+      resetBtn.addEventListener('pointerup', holdCancel);
+      resetBtn.addEventListener('pointercancel', holdCancel);
+      resetBtn.addEventListener('pointerleave', holdCancel);
+      resetBtn.addEventListener('lostpointercapture', holdCancel);
+      resetBtn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+      // ---------- 설정 ----------
+      function applyMinutes(v) {
+        var raw = (v === null || v === undefined) ? '' : String(v).trim();
+        v = raw === '' ? NaN : Math.round(Number(raw));
+        if (!isFinite(v)) v = minutes;   // 빈 칸/잘못된 입력은 이전 값 유지
+        if (v < 1) v = 1;
+        if (v > 99) v = 99;
+        minutes = v;
+        minutesInput.value = v;
+        saveMinutes();
+        Array.prototype.forEach.call(presetsEl.querySelectorAll('button'), function (b) {
+          b.classList.toggle('active', parseInt(b.getAttribute('data-min'), 10) === v);
+        });
+        if (state === 'idle') {
+          totalMs = minutes * 60000;
+          remainingMs = totalMs;
+          renderTime(remainingMs);
+          timeEl.classList.remove('warn', 'crit');
+        }
+      }
+      function closeSettings() {
+        applyMinutes(minutesInput.value);
+        settingsEl.hidden = true;
+      }
+      settingsBtn.addEventListener('click', function () {
+        if (state !== 'idle' && state !== 'done') return;
+        minutesInput.value = minutes;
+        settingsEl.hidden = false;
+      });
+      $('closeSettings').addEventListener('click', closeSettings);
+      settingsEl.addEventListener('click', function (e) {
+        if (e.target === settingsEl) closeSettings();
+      });
+      minutesInput.addEventListener('change', function () { applyMinutes(minutesInput.value); });
+      $('minMinus').addEventListener('click', function () { applyMinutes(minutes - 1); });
+      $('minPlus').addEventListener('click', function () { applyMinutes(minutes + 1); });
+      presetsEl.addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-min]');
+        if (b) { minutesInput.blur(); applyMinutes(b.getAttribute('data-min')); }
+      });
+
+      // ---------- 기록 ----------
+      var lastSaveOk = true;
+      function addRecord(r) {
+        loadRecords();   // 다른 탭/창에서 바뀐 내용을 덮어쓰지 않도록 먼저 다시 읽는다
+        var id = Date.now();
+        while (records.some(function (x) { return x.id === id; })) id += 1;
+        var rec = { id: id, date: new Date().toISOString(), minutes: runMinutes, rounds: r, reps: 0 };
+        records.unshift(rec);
+        lastSaveOk = saveRecords();
+        return rec.id;
+      }
+      function showResultCard() {
+        var rec = currentRecord();
+        resultEl.classList.toggle('gone', !rec);
+        savedNote.classList.remove('warn');
+        if (!rec) {
+          savedNote.textContent = '이 기록은 삭제되었습니다. 새 운동을 시작하세요.';
+        } else if (!lastSaveOk) {
+          savedNote.textContent = '저장 실패: 브라우저 저장소를 쓸 수 없습니다. 기록을 따로 적어 두세요.';
+          savedNote.classList.add('warn');
+        } else {
+          savedNote.textContent = '기록이 저장되었습니다. 마지막 부분 라운드의 횟수를 입력하세요.';
+        }
+        syncResultCard();
+      }
+      function currentRecord() {
+        for (var i = 0; i < records.length; i++) {
+          if (records[i].id === currentRecordId) return records[i];
+        }
+        return null;
+      }
+      function clampInt(v, lo, hi, fallback) {
+        v = parseInt(v, 10);
+        if (isNaN(v)) return fallback;
+        return Math.min(hi, Math.max(lo, v));
+      }
+      function syncResultCard() {
+        var rec = currentRecord();
+        var reps = rec ? (rec.reps || 0) : 0;
+        finalRounds.textContent = rounds;
+        finalReps.textContent = reps;
+        roundsInput.value = rounds;
+        repsInput.value = reps;
+      }
+      function setRounds(v) {
+        var rec = currentRecord();
+        if (!rec) return;
+        rounds = clampInt(v, 0, 999, rounds);
+        renderRounds();
+        rec.rounds = rounds; saveRecords(); renderHistory();
+        syncResultCard();
+        document.title = '완료 ' + rounds + 'R · Cindy AMRAP';
+      }
+      function setReps(v) {
+        var rec = currentRecord();
+        if (!rec) return;
+        var reps = clampInt(v, 0, 999, rec.reps || 0);
+        rec.reps = reps; saveRecords(); renderHistory();
+        finalReps.textContent = reps;
+        repsInput.value = reps;
+      }
+      function bindStepper(input, minusBtnEl, plusBtnEl, setter, getter) {
+        input.addEventListener('change', function () { setter(input.value); });
+        input.addEventListener('input', function () {
+          var v = parseInt(input.value, 10);
+          if (!isNaN(v)) setter(v);
+        });
+        minusBtnEl.addEventListener('click', function () { setter(getter() - 1); });
+        plusBtnEl.addEventListener('click', function () { setter(getter() + 1); });
+      }
+      bindStepper(roundsInput, $('roundsMinus'), $('roundsPlus'), setRounds, function () { return rounds; });
+      bindStepper(repsInput, $('repsMinus'), $('repsPlus'), setReps, function () { var r = currentRecord(); return r ? (r.reps || 0) : 0; });
+
+      function better(a, b) {
+        if (a.rounds !== b.rounds) return a.rounds > b.rounds;
+        return (a.reps || 0) > (b.reps || 0);
+      }
+      // 운동 시간(분)이 같은 기록끼리 비교해 최고 기록을 고른다
+      function bestIds() {
+        var bestByMin = {};
+        records.forEach(function (r) {
+          var k = String(r.minutes || 20);
+          if (!bestByMin[k] || better(r, bestByMin[k])) bestByMin[k] = r;
+        });
+        var ids = {};
+        records.forEach(function (r) {
+          var b = bestByMin[String(r.minutes || 20)];
+          if (b && !better(b, r)) ids[r.id] = true;   // 동점이면 함께 표시
+        });
+        return ids;
+      }
+      function fmtDate(iso) {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        var opts = { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' };
+        if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+        try {
+          return d.toLocaleString('ko-KR', opts);
+        } catch (e) {
+          return d.getFullYear() + '. ' + (d.getMonth() + 1) + '. ' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+      }
+      function renderHistory() {
+        historyList.innerHTML = '';
+        var best = bestIds();
+        historyCount.textContent = records.length ? records.length + '회' : '';
+        historyEmpty.hidden = records.length > 0;
+        records.forEach(function (rec) {
+          var li = document.createElement('li');
+          var isBest = !!best[rec.id];
+          if (isBest) li.className = 'best';
+
+          var left = document.createElement('div');
+          var when = document.createElement('div');
+          when.className = 'when';
+          when.textContent = fmtDate(rec.date) + (rec.minutes && rec.minutes !== 20 ? ' · ' + rec.minutes + '분' : '');
+          left.appendChild(when);
+          if (isBest) {
+            var star = document.createElement('div');
+            star.style.fontSize = '0.75rem';
+            star.style.color = 'var(--amber)';
+            star.textContent = '★ 최고 기록' + (rec.minutes && rec.minutes !== 20 ? ' (' + rec.minutes + '분)' : '');
+            left.appendChild(star);
+          }
+
+          var score = document.createElement('div');
+          score.className = 'score';
+          score.textContent = rec.rounds + 'R' + (rec.reps ? ' + ' + rec.reps : '');
+
+          var del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'del';
+          del.textContent = '×';
+          del.setAttribute('aria-label', '기록 삭제');
+          del.addEventListener('click', function () {
+            if (!del.classList.contains('confirm')) {
+              del.classList.add('confirm');
+              del.textContent = '삭제?';
+              setTimeout(function () {
+                if (del.isConnected) { del.classList.remove('confirm'); del.textContent = '×'; }
+              }, 3000);
+              return;
+            }
+            records = records.filter(function (r) { return r.id !== rec.id; });
+            if (rec.id === currentRecordId) { currentRecordId = null; savePending(null); showResultCard(); }
+            saveRecords();
+            renderHistory();
+          });
+
+          li.appendChild(left);
+          li.appendChild(score);
+          li.appendChild(del);
+          historyList.appendChild(li);
+        });
+      }
+
+      // ---------- Web Audio ----------
+      function ensureAudio() {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        if (!audioCtx) {
+          try { audioCtx = new Ctx(); } catch (e) { return null; }
+          // iOS 17+: 무음 스위치가 켜져 있어도 알림음이 나도록 재생 세션으로 전환
+          try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+          try {
+            audioCtx.addEventListener('statechange', function () {
+              // 전화·앱 전환 등 중단 뒤 다시 켜지면 남은 시간 기준으로 알림음을 다시 예약
+              if (audioCtx.state === 'running' && state === 'running') scheduleCues();
+            });
+          } catch (e) {}
+        }
+        // 'suspended'뿐 아니라 Safari의 'interrupted' 상태도 복구
+        if (audioCtx.state !== 'running') {
+          try { var p = audioCtx.resume(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+        }
+        return audioCtx;
+      }
+      function tone(ctx, at, freq, dur, gainValue, type) {
+        var osc = ctx.createOscillator();
+        var g = ctx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.setValueAtTime(freq, at);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(gainValue, at + 0.01);
+        g.gain.setValueAtTime(gainValue, Math.max(at + 0.01, at + dur - 0.03));
+        g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(at);
+        osc.stop(at + dur + 0.02);
+        return { osc: osc, g: g };
+      }
+      function safe(fn) { try { return fn(); } catch (e) { return []; } }
+      function sfxTap() {
+        var ctx = ensureAudio(); if (!ctx) return;
+        safe(function () { tone(ctx, ctx.currentTime, 1400, 0.05, 0.35, 'square'); });
+      }
+      function sfxUndo() {
+        var ctx = ensureAudio(); if (!ctx) return;
+        safe(function () { tone(ctx, ctx.currentTime, 500, 0.07, 0.3, 'triangle'); });
+      }
+      function sfxStart() {
+        var ctx = ensureAudio(); if (!ctx) return;
+        safe(function () {
+          var t = ctx.currentTime + 0.02;
+          tone(ctx, t, 660, 0.12, 0.4);
+          tone(ctx, t + 0.15, 990, 0.2, 0.4);
+        });
+      }
+      // 아래 셋은 예약 시각(at)을 받아 만든 노드 목록을 돌려준다 (취소용)
+      function sfxMinuteAt(ctx, t) {
+        return [
+          tone(ctx, t, 880, 0.18, 0.5),
+          tone(ctx, t + 0.22, 880, 0.18, 0.5),
+          tone(ctx, t + 0.44, 1175, 0.35, 0.5)
+        ];
+      }
+      function sfxCountAt(ctx, t, sec) {
+        return [tone(ctx, t, sec <= 3 ? 1320 : 880, 0.09, 0.5)];
+      }
+      function sfxFinishAt(ctx, t) {
+        var out = [];
+        for (var i = 0; i < 3; i++) {
+          var b = t + i * 0.55;
+          out.push(tone(ctx, b, 1047, 0.14, 0.55));
+          out.push(tone(ctx, b + 0.17, 1319, 0.14, 0.55));
+          out.push(tone(ctx, b + 0.34, 1568, 0.22, 0.55));
+        }
+        out.push(tone(ctx, t + 1.75, 1568, 0.9, 0.55));
+        return out;
+      }
+      function sfxFinish() {
+        var ctx = ensureAudio(); if (!ctx) return;
+        safe(function () { sfxFinishAt(ctx, ctx.currentTime + 0.03); });
+      }
+
+      // 남은 시간 기준으로 1분 알림·마지막 10초·종료음을 오디오 클록에 미리 예약한다.
+      // setInterval이 늦어져도 소리는 정확한 시각에 난다.
+      function scheduleCues() {
+        cancelCues();
+        if (state !== 'running') return;
+        var ctx = ensureAudio(); if (!ctx) return;
+        var left = timeLeft();
+        if (left <= 0) return;
+        safe(function () {
+          var base = ctx.currentTime + 0.02;
+          var list = [];
+          if (left > 60000) list = list.concat(sfxMinuteAt(ctx, base + (left - 60000) / 1000));
+          for (var k = 10; k >= 1; k--) {
+            if (left > k * 1000) list = list.concat(sfxCountAt(ctx, base + (left - k * 1000) / 1000, k));
+          }
+          list = list.concat(sfxFinishAt(ctx, base + left / 1000));
+          cues = list;
+          return list;
+        });
+      }
+      function cancelCues() {
+        var list = cues;
+        cues = [];
+        list.forEach(function (n) {
+          try { n.osc.stop(0); } catch (e) {}
+          try { n.g.disconnect(); } catch (e) {}
+        });
+      }
+      function vibrate(p) {
+        if (!navigator.vibrate) return false;
+        try { return navigator.vibrate(p); } catch (e) { return false; }
+      }
+
+      // ---------- Wake Lock ----------
+      function requestWakeLock() {
+        if (wakeReleaseTimer) { clearTimeout(wakeReleaseTimer); wakeReleaseTimer = null; }
+        if (!('wakeLock' in navigator) || wakeLock || wakePending) return;
+        wakePending = true;
+        navigator.wakeLock.request('screen').then(function (lock) {
+          wakePending = false;
+          if (state === 'idle' || wakeLock) { lock.release().catch(function () {}); return; }
+          wakeLock = lock;
+          lock.addEventListener('release', function () { if (wakeLock === lock) wakeLock = null; });
+        }).catch(function () { wakePending = false; });
+      }
+      function releaseWakeLock() {
+        if (wakeReleaseTimer) { clearTimeout(wakeReleaseTimer); wakeReleaseTimer = null; }
+        if (!wakeLock) return;
+        var l = wakeLock;
+        wakeLock = null;
+        l.release().catch(function () {});
+      }
+      // 완료 화면에서는 횟수를 적는 동안만 켜 두고, 그 뒤엔 배터리를 위해 해제
+      function scheduleWakeRelease(ms) {
+        if (wakeReleaseTimer) clearTimeout(wakeReleaseTimer);
+        wakeReleaseTimer = setTimeout(function () { wakeReleaseTimer = null; releaseWakeLock(); }, ms);
+      }
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible') return;
+        if (state === 'running') {
+          ensureAudio();
+          tick();
+          if (state === 'running') { scheduleCues(); requestWakeLock(); }
+        } else if (state === 'paused') {
+          requestWakeLock();
+        }
+        if (state === 'done' && pendingVibe) {
+          if (vibrate(pendingVibe)) pendingVibe = null;
+        }
+      });
+
+      // ---------- 제스처 차단 ----------
+      document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      document.addEventListener('dblclick', function (e) { e.preventDefault(); });
+      document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+      document.addEventListener('touchmove', function (e) {
+        if (state === 'running' || state === 'paused') { e.preventDefault(); return; }
+        if (!settingsEl.hidden) return;
+        var a = document.activeElement;
+        if (a && a.tagName === 'INPUT') return;
+        if (e.target && e.target.closest && e.target.closest('[data-scroll]')) return;
+        e.preventDefault();
+      }, { passive: false });
+      // 다른 탭/창에서 기록이 바뀌면 바로 반영
+      window.addEventListener('storage', function (e) {
+        if (e.key !== KEY_REC) return;
+        loadRecords();
+        renderHistory();
+        if (state === 'done') showResultCard();
+      });
+      window.addEventListener('beforeunload', function (e) {
+        if (state === 'running' || state === 'paused') { e.preventDefault(); e.returnValue = ''; }
+      });
+      settingsEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); closeSettings(); } });
+
+      // 키보드(데스크톱 확인용): Space = 라운드 +1 / Enter = 시작 / P = 일시정지 / Backspace = −1
+      document.addEventListener('keydown', function (e) {
+        var tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT') return;
+        if (!settingsEl.hidden) return;
+        if (e.code === 'Space') { e.preventDefault(); if (state === 'running') addRound(performance.now()); }
+        else if (e.key === 'Enter' && state === 'idle') start();
+        else if (e.key === 'p' || e.key === 'P') pauseBtn.click();
+        else if (e.key === 'Backspace') undoRound();
+      });
+
+      // ---------- 초기화 ----------
+      loadMinutes();
+      loadRecords();
+      applyMinutes(minutes);
+      renderHistory();
+      var pending = loadPending();
+      var pendingRec = null;
+      if (pending !== null) {
+        records.forEach(function (r) { if (r.id === pending) pendingRec = r; });
+      }
+      if (pendingRec) {
+        // 완료 직후 페이지가 다시 열린 경우: 결과 화면을 복원해 횟수를 이어서 입력할 수 있게 한다
+        currentRecordId = pendingRec.id;
+        rounds = pendingRec.rounds;
+        remainingMs = 0;
+        renderRounds();
+        renderTime(0);
+        showResultCard();
+        setState('done');
+      } else {
+        savePending(null);
+        renderRounds();
+        setState('idle');
+      }
+    })();
+  </script>
+</body>
+</html>
