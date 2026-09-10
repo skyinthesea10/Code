@@ -140,6 +140,7 @@
       display: flex;
       flex-direction: column;
     }
+    body[data-state="countdown"] #mid,
     body[data-state="running"] #mid,
     body[data-state="paused"] #mid { overflow: hidden; touch-action: none; }
     main {
@@ -164,6 +165,22 @@
       transition: transform 0.08s ease;
     }
     #rounds.bump { transform: scale(1.06); }
+    #cdBox { display: none; flex-direction: column; align-items: center; }
+    #cdLabel { font-size: 1rem; letter-spacing: 0.3em; color: var(--muted); font-weight: 600; }
+    #cdNum {
+      font-size: min(clamp(140px, 50vw, 240px), 34vh);
+      font-weight: 800;
+      line-height: 1;
+      color: var(--amber);
+      font-variant-numeric: tabular-nums;
+    }
+    #cdNum.bump { animation: cdBump 0.35s ease-out; }
+    @keyframes cdBump { from { transform: scale(1.25); opacity: 0.6; } to { transform: scale(1); opacity: 1; } }
+    body[data-state="countdown"] #cdBox { display: flex; }
+    body[data-state="countdown"] .rounds-label,
+    body[data-state="countdown"] #rounds,
+    body[data-state="countdown"] #splitInfo { display: none; }
+    body[data-state="countdown"] #startBtn { background: var(--panel-2); color: var(--fg); }
     #splitInfo {
       margin-top: 6px;
       font-family: var(--mono);
@@ -461,6 +478,8 @@
     /* ---------- 상태별 표시 ---------- */
     /* 헤더 버튼은 visibility로 숨겨 3열 그리드가 무너지지 않게 한다 */
     body[data-state="idle"] #pauseBtn,
+    body[data-state="countdown"] #pauseBtn,
+    body[data-state="countdown"] #settingsBtn,
     body[data-state="running"] #settingsBtn,
     body[data-state="paused"] #settingsBtn,
     body[data-state="done"] #pauseBtn { visibility: hidden; pointer-events: none; }
@@ -470,6 +489,11 @@
     body[data-state="idle"] #resetBtn,
     body[data-state="idle"] #result { display: none; }
 
+    body[data-state="countdown"] #pausedBadge,
+    body[data-state="countdown"] #minusBtn,
+    body[data-state="countdown"] #resetBtn,
+    body[data-state="countdown"] #result,
+    body[data-state="countdown"] #history,
     body[data-state="running"] #pausedBadge,
     body[data-state="running"] #startBtn,
     body[data-state="running"] #result,
@@ -533,6 +557,7 @@
   <div id="mid" data-scroll>
   <main>
     <div id="pausedBadge">일시정지 · 탭 잠김</div>
+    <div id="cdBox" aria-live="assertive"><div id="cdLabel">준비</div><div id="cdNum">3</div></div>
     <div class="rounds-label">ROUNDS</div>
     <div id="rounds">0</div>
     <div id="splitInfo"></div>
@@ -629,6 +654,7 @@
       var historyEmpty = $('historyEmpty');
       var historyCount = $('historyCount');
       var splitInfoEl = $('splitInfo');
+      var cdNum = $('cdNum');
       var statsEl = $('stats');
       var splitsEl = $('splits');
 
@@ -638,12 +664,13 @@
       var KEY_PENDING = 'cindy-amrap-pending';   // 완료 후 아직 횟수를 적는 중인 기록 id
       var TAP_DEBOUNCE_MS = 300;
       var RESET_HOLD_MS = 2000;
+      var COUNTDOWN_MS = 3000;
       var TICK_MS = 50;
       var MAX_RECORDS = 500;
       var DONE_WAKE_GRACE_MS = 3 * 60 * 1000;
 
       // ---------- 상태 ----------
-      var state = 'idle';          // idle | running | paused | done
+      var state = 'idle';          // idle | countdown | running | paused | done
       var minutes = 20;
       var runMinutes = 20;         // 이번 운동에 실제 적용된 시간 (실행 중 설정이 바뀌어도 기록은 이 값)
       var totalMs = minutes * 60000;
@@ -662,6 +689,10 @@
       var savedNote = $('savedNote');
       var audioCtx = null;
       var cues = [];               // 오디오 클록에 미리 예약한 알림음 노드
+      var cdTimer = null;          // 시작 전 3·2·1 카운트다운
+      var cdEndAt = 0;
+      var cdNodes = [];
+      var cdLast = null;
       var pendingVibe = null;      // 화면이 숨겨진 상태에서 놓친 진동
       var records = [];
       var currentRecordId = null;
@@ -777,11 +808,15 @@
         body.setAttribute('data-state', next);
         pauseBtn.setAttribute('aria-label', next === 'paused' ? '재개' : '일시정지');
         resetLabel.textContent = (next === 'done') ? '새 운동' : '리셋';
+        startBtn.textContent = (next === 'countdown') ? '취소' : '시작';
         renderSplitInfo();
         switch (next) {
           case 'idle':
             hintEl.textContent = '시작을 누른 뒤 화면 아무 곳이나 탭하면 라운드가 올라갑니다';
             document.title = 'Cindy AMRAP';
+            break;
+          case 'countdown':
+            hintEl.textContent = '준비하세요. 신호음 뒤에 시작됩니다';
             break;
           case 'running':
             hintEl.textContent = '화면 아무 곳이나 탭 = 라운드 +1';
@@ -825,8 +860,57 @@
         if (tickId !== null) { clearInterval(tickId); tickId = null; }
       }
 
-      function start() {
+      // 시작 버튼 → 3·2·1 카운트다운 → start()
+      function beginCountdown() {
         if (state !== 'idle') return;
+        settingsEl.hidden = true;
+        var ctx = ensureAudio();
+        cdEndAt = Date.now() + COUNTDOWN_MS;
+        cdLast = null;
+        setState('countdown');
+        requestWakeLock();
+        cdNodes = [];
+        if (ctx) safe(function () {
+          var b = ctx.currentTime + 0.02;
+          cdNodes = [tone(ctx, b, 880, 0.12, 0.5), tone(ctx, b + 1, 880, 0.12, 0.5), tone(ctx, b + 2, 880, 0.12, 0.5)];
+          return cdNodes;
+        });
+        renderCountdown();
+        cdTimer = setInterval(renderCountdown, 50);
+      }
+      function renderCountdown() {
+        if (state !== 'countdown') return;
+        var left = cdEndAt - Date.now();
+        if (left <= 0) {
+          clearInterval(cdTimer); cdTimer = null;
+          cdNodes = [];
+          start();
+          return;
+        }
+        var n = Math.ceil(left / 1000);
+        if (n !== cdLast) {
+          cdLast = n;
+          cdNum.textContent = n;
+          cdNum.classList.remove('bump');
+          void cdNum.offsetWidth;
+          cdNum.classList.add('bump');
+          vibrate(30);
+        }
+      }
+      function cancelCountdown() {
+        if (state !== 'countdown') return;
+        if (cdTimer) { clearInterval(cdTimer); cdTimer = null; }
+        cdNodes.forEach(function (n) {
+          try { n.osc.stop(0); } catch (e) {}
+          try { n.g.disconnect(); } catch (e) {}
+        });
+        cdNodes = [];
+        setState('idle');
+        releaseWakeLock();
+      }
+
+      function start() {
+        if (state !== 'idle' && state !== 'countdown') return;
         settingsEl.hidden = true;
         ensureAudio();
         runMinutes = minutes;
@@ -949,7 +1033,10 @@
       }, { passive: true });
 
       // ---------- 버튼 ----------
-      startBtn.addEventListener('click', start);
+      startBtn.addEventListener('click', function () {
+        if (state === 'idle') beginCountdown();
+        else if (state === 'countdown') cancelCountdown();
+      });
       pauseBtn.addEventListener('click', function () {
         if (state === 'running') pause();
         else if (state === 'paused') resume();
@@ -1357,7 +1444,7 @@
         if (state === 'done') showResultCard();
       });
       window.addEventListener('beforeunload', function (e) {
-        if (state === 'running' || state === 'paused') { e.preventDefault(); e.returnValue = ''; }
+        if (state === 'running' || state === 'paused' || state === 'countdown') { e.preventDefault(); e.returnValue = ''; }
       });
       settingsEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); closeSettings(); } });
 
@@ -1367,7 +1454,8 @@
         if (tag === 'INPUT') return;
         if (!settingsEl.hidden) return;
         if (e.code === 'Space') { e.preventDefault(); if (state === 'running') addRound(performance.now()); }
-        else if (e.key === 'Enter' && state === 'idle') start();
+        else if (e.key === 'Enter' && state === 'idle') beginCountdown();
+        else if (e.key === 'Escape' && state === 'countdown') cancelCountdown();
         else if (e.key === 'p' || e.key === 'P') pauseBtn.click();
         else if (e.key === 'Backspace') undoRound();
       });
