@@ -2,12 +2,16 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0b0d12">
   <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cindy">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <title>Cindy AMRAP</title>
   <style>
     :root {
@@ -268,6 +272,82 @@
     #splits span.fast { color: var(--green); }
     #splits span.slow { color: var(--amber); }
     #historyList .avg { color: var(--muted); font-size: 0.72rem; font-family: var(--mono); }
+    #historyList li { cursor: pointer; }
+    #historyList .laps {
+      grid-column: 1 / -1;
+      display: none;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 2px 0 4px;
+    }
+    #historyList li.open .laps { display: flex; }
+    #historyList .laps span {
+      font-family: var(--mono);
+      font-size: 0.76rem;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 3px 7px;
+      font-variant-numeric: tabular-nums;
+    }
+    #historyList .laps span.fast { color: var(--green); }
+    #historyList .laps span.slow { color: var(--amber); }
+    #historyList .laps .none { color: var(--muted); background: none; padding-left: 0; }
+    #history h2 .tools { display: flex; align-items: center; gap: 10px; }
+    .mini {
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      background: var(--panel-2);
+      letter-spacing: 0;
+    }
+    body[data-state="done"] .mini { background: rgba(255,255,255,0.14); color: #fff; }
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      resize: vertical;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      line-height: 1.4;
+      color: var(--fg);
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      outline: none;
+      user-select: text;
+      -webkit-user-select: text;
+      touch-action: pan-y;
+      margin-bottom: 10px;
+    }
+    textarea:focus { border-color: var(--accent); }
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+    .btn-row button { height: 48px; font-size: 1rem; font-weight: 700; }
+    .btn-primary { background: var(--accent); color: #0b0d12; }
+    .btn-secondary { background: var(--panel-2); color: var(--fg); }
+    .sheet .full { width: 100%; height: 54px; font-size: 1.05rem; font-weight: 800; }
+    .sheet .full + .full { margin-top: 10px; }
+    #resumeInfo { font-size: 0.95rem; color: var(--fg); line-height: 1.6; margin: 0 0 16px; white-space: pre-line; }
+    #ioStatus { min-height: 1.2em; }
+    #toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(96px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      max-width: calc(100% - 40px);
+      background: var(--panel-2);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      z-index: 120;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+      pointer-events: none;
+    }
+    #toast.action { pointer-events: auto; cursor: pointer; border-color: var(--accent); }
     #result .lbl { font-size: 0.95rem; color: var(--muted); }
     .stepper {
       display: flex;
@@ -433,6 +513,11 @@
     .sheet {
       width: 100%;
       max-width: 480px;
+      max-height: 100%;
+      overflow-y: auto;
+      touch-action: pan-y;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       background: var(--panel);
       border-radius: 22px 22px 0 0;
       padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
@@ -448,6 +533,15 @@
     }
     .field label { color: var(--muted); font-size: 0.95rem; }
     .field .stepper input { width: 72px; }
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .toggle label { color: var(--muted); font-size: 0.9rem; line-height: 1.4; }
+    .toggle input { width: 22px; height: 22px; accent-color: var(--accent); flex: 0 0 auto; }
     .presets {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -588,7 +682,7 @@
   </section>
 
   <section id="history" data-nocount>
-    <h2><span>기록</span><span id="historyCount"></span></h2>
+    <h2><span>기록</span><span class="tools"><span id="historyCount"></span><button id="ioBtn" class="mini" type="button">내보내기 / 가져오기</button></span></h2>
     <ul id="historyList"></ul>
     <div id="historyEmpty">아직 기록이 없습니다. 첫 Cindy를 시작해 보세요.</div>
   </section>
@@ -603,6 +697,32 @@
       <small>2초 길게</small>
     </button>
   </footer>
+
+  <div id="resumeModal" class="modal" data-nocount hidden>
+    <div class="sheet">
+      <h2>진행 중이던 운동이 있습니다. 이어서 할까요?</h2>
+      <p id="resumeInfo"></p>
+      <button id="resumeYes" class="full btn-primary" type="button">이어서 하기</button>
+      <button id="resumeNo" class="full btn-secondary" type="button">버리고 새로 시작</button>
+    </div>
+  </div>
+
+  <div id="ioModal" class="modal" data-nocount hidden>
+    <div class="sheet">
+      <h2>기록 내보내기 / 가져오기</h2>
+      <p class="note">아래 JSON을 복사해 메모 앱 등에 보관하세요. 다른 기기로 옮기려면 그 JSON을 여기에 붙여넣고 "가져오기"를 누르면 같은 기록은 건너뛰고 새 기록만 합쳐집니다.</p>
+      <div class="btn-row">
+        <button id="ioCopy" class="btn-primary" type="button">복사</button>
+        <button id="ioImport" class="btn-secondary" type="button">가져오기</button>
+      </div>
+      <textarea id="ioText" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+      <p class="note" id="ioStatus"></p>
+      <button id="ioClose" class="full btn-secondary" type="button">닫기</button>
+    </div>
+  </div>
+
+  <audio id="silent" loop playsinline preload="auto" src="data:audio/wav;base64,UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA=="></audio>
+  <div id="toast" hidden></div>
 
   <div id="settings" class="modal" data-nocount hidden>
     <div class="sheet">
@@ -620,6 +740,10 @@
         <button type="button" data-min="15">15분</button>
         <button type="button" data-min="20">20분</button>
         <button type="button" data-min="30">30분</button>
+      </div>
+      <div class="toggle">
+        <label for="overrideMute">iPhone 무음 스위치를 무시하고 알림음 재생<br><small>켜면 운동 중 재생하던 음악이 멈출 수 있습니다</small></label>
+        <input type="checkbox" id="overrideMute" checked>
       </div>
       <p class="note">Cindy: 5 풀업 · 10 푸시업 · 15 스쿼트, 20분 AMRAP. 남은 1분에 알림음, 마지막 10초는 매초 신호음이 울립니다.</p>
       <button id="closeSettings" type="button">확인</button>
@@ -662,11 +786,14 @@
       var KEY_MIN = 'cindy-amrap-minutes';
       var KEY_REC = 'cindy-amrap-records';
       var KEY_PENDING = 'cindy-amrap-pending';   // 완료 후 아직 횟수를 적는 중인 기록 id
+      var KEY_PROGRESS = 'cindy-amrap-progress'; // 진행 중(실행·일시정지) 상태
+      var KEY_MUTE = 'cindy-amrap-override-mute'; // 무음 스위치 무시 여부 ('0'이면 끔)
       var TAP_DEBOUNCE_MS = 300;
       var RESET_HOLD_MS = 2000;
       var COUNTDOWN_MS = 3000;
       var TICK_MS = 50;
       var MAX_RECORDS = 500;
+      var MAX_SPLITS = 5000;      // 20분에 300ms 디바운스로는 4000라운드를 넘을 수 없다
       var DONE_WAKE_GRACE_MS = 3 * 60 * 1000;
 
       // ---------- 상태 ----------
@@ -687,13 +814,24 @@
       var wakePending = false;
       var resultEl = $('result');
       var savedNote = $('savedNote');
+      var silentEl = $('silent');
+      var toastEl = $('toast');
+      var resumeModal = $('resumeModal');
+      var ioModal = $('ioModal');
+      var ioText = $('ioText');
+      var ioStatus = $('ioStatus');
       var audioCtx = null;
       var cues = [];               // 오디오 클록에 미리 예약한 알림음 노드
+      var cueFinishAt = 0;         // 예약된 종료음의 오디오 클록 시각
+      var overrideMute = true;     // iOS 무음 스위치 무시(무음 오디오 재생 + playback 세션)
+      var mediaWanted = false;     // 무음 오디오가 재생 중이어야 하는 상태인지
+      var mediaStopTimer = null;
+      var wakeWarned = false;
       var cdTimer = null;          // 시작 전 3·2·1 카운트다운
       var cdEndAt = 0;
-      var cdNodes = [];
       var cdLast = null;
       var pendingVibe = null;      // 화면이 숨겨진 상태에서 놓친 진동
+      var INSTANCE = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 이 창(탭)의 식별자
       var records = [];
       var currentRecordId = null;
 
@@ -714,6 +852,9 @@
             records = arr.filter(function (r) {
               return r && typeof r.id === 'number' && typeof r.rounds === 'number';
             });
+            records.forEach(function (r) {
+              if (Array.isArray(r.splits) && r.splits.length > MAX_SPLITS) r.splits = r.splits.slice(0, MAX_SPLITS);
+            });
           }
         } catch (e) { records = []; }
       }
@@ -726,6 +867,37 @@
           if (id === null) localStorage.removeItem(KEY_PENDING);
           else localStorage.setItem(KEY_PENDING, String(id));
         } catch (e) {}
+      }
+      function saveProgress() {
+        try {
+          if (state === 'running' || state === 'paused') {
+            localStorage.setItem(KEY_PROGRESS, JSON.stringify({
+              state: state,
+              endAt: endAt,
+              remainingMs: remainingMs,
+              totalMs: totalMs,
+              runMinutes: runMinutes,
+              rounds: rounds,
+              splits: splits,
+              lastMark: lastMark,
+              owner: INSTANCE,
+              savedAt: Date.now()
+            }));
+          } else {
+            localStorage.removeItem(KEY_PROGRESS);
+          }
+        } catch (e) {}
+      }
+      function loadProgress() {
+        try {
+          var p = JSON.parse(localStorage.getItem(KEY_PROGRESS) || 'null');
+          if (!p || (p.state !== 'running' && p.state !== 'paused')) return null;
+          if (typeof p.rounds !== 'number') return null;
+          return p;
+        } catch (e) { return null; }
+      }
+      function clearProgress() {
+        try { localStorage.removeItem(KEY_PROGRESS); } catch (e) {}
       }
       function loadPending() {
         try {
@@ -767,6 +939,14 @@
         for (var i = 0; i < list.length; i++) sum += list[i];
         return sum / list.length;
       }
+      function minMax(list) {
+        var lo = Infinity, hi = -Infinity;
+        for (var i = 0; i < list.length; i++) {
+          if (list[i] < lo) lo = list[i];
+          if (list[i] > hi) hi = list[i];
+        }
+        return [lo, hi];
+      }
       function renderSplitInfo() {
         if (state !== 'running' && state !== 'paused') { splitInfoEl.textContent = ''; return; }
         var cur = elapsedMs() - lastMark;
@@ -785,8 +965,8 @@
           return;
         }
         var avg = avgSplit(list);
-        var best = Math.min.apply(null, list);
-        var worst = Math.max.apply(null, list);
+        var mm = minMax(list);
+        var best = mm[0], worst = mm[1];
         [[fmtDur(avg), '라운드 평균'], [fmtDur(best), '가장 빠름'], [fmtDur(worst), '가장 느림']].forEach(function (p) {
           var d = document.createElement('div');
           d.className = 'stat';
@@ -810,6 +990,7 @@
         resetLabel.textContent = (next === 'done') ? '새 운동' : '리셋';
         startBtn.textContent = (next === 'countdown') ? '취소' : '시작';
         renderSplitInfo();
+        if (updateReady && (next === 'idle' || next === 'done')) { updateReady = false; offerUpdate(); }
         switch (next) {
           case 'idle':
             hintEl.textContent = '시작을 누른 뒤 화면 아무 곳이나 탭하면 라운드가 올라갑니다';
@@ -862,19 +1043,19 @@
 
       // 시작 버튼 → 3·2·1 카운트다운 → start()
       function beginCountdown() {
-        if (state !== 'idle') return;
+        if (state !== 'idle' || modalOpen()) return;
         settingsEl.hidden = true;
         var ctx = ensureAudio();
+        unlockMedia();
         cdEndAt = Date.now() + COUNTDOWN_MS;
         cdLast = null;
+        cancelCues();   // 이전 운동에서 멈춘 오디오 클록에 남아 있을 수 있는 예약음 제거
         setState('countdown');
         requestWakeLock();
-        cdNodes = [];
-        if (ctx) safe(function () {
-          var b = ctx.currentTime + 0.02;
-          cdNodes = [tone(ctx, b, 880, 0.12, 0.5), tone(ctx, b + 1, 880, 0.12, 0.5), tone(ctx, b + 2, 880, 0.12, 0.5)];
-          return cdNodes;
-        });
+        if (!('wakeLock' in navigator) && !wakeWarned) {
+          wakeWarned = true;
+          showToast('이 브라우저는 화면 켜짐 유지를 지원하지 않습니다. 자동 잠금을 길게 설정해 두세요.', 6000);
+        }
         renderCountdown();
         cdTimer = setInterval(renderCountdown, 50);
       }
@@ -883,7 +1064,6 @@
         var left = cdEndAt - Date.now();
         if (left <= 0) {
           clearInterval(cdTimer); cdTimer = null;
-          cdNodes = [];
           start();
           return;
         }
@@ -895,18 +1075,66 @@
           void cdNum.offsetWidth;
           cdNum.classList.add('bump');
           vibrate(30);
+          playCountBeep(n);
         }
+      }
+      // 카운트다운 신호음: 오디오 클록이 아직 안 돌고 있으면 돌기 시작한 직후에 낸다 (첫 시작 때 흔함)
+      function playCountBeep(n) {
+        var ctx = ensureAudio(); if (!ctx) return;
+        if (ctx.state === 'running') { safe(function () { tone(ctx, ctx.currentTime, 880, 0.12, 0.5); }); return; }
+        try {
+          ctx.resume().then(function () {
+            if (state === 'countdown' && cdLast === n) safe(function () { tone(ctx, ctx.currentTime, 880, 0.12, 0.5); });
+          }).catch(function () {});
+        } catch (e) {}
       }
       function cancelCountdown() {
         if (state !== 'countdown') return;
         if (cdTimer) { clearInterval(cdTimer); cdTimer = null; }
-        cdNodes.forEach(function (n) {
-          try { n.osc.stop(0); } catch (e) {}
-          try { n.g.disconnect(); } catch (e) {}
-        });
-        cdNodes = [];
         setState('idle');
+        stopMedia();
         releaseWakeLock();
+      }
+
+      // 저장된 진행 상태로 복귀 (사용자가 '이어서 하기'를 누른 제스처 안에서 호출)
+      function restoreProgress(prog) {
+        if (state === 'countdown') cancelCountdown();
+        if (state !== 'idle') return;
+        runMinutes = prog.runMinutes || 20;
+        totalMs = prog.totalMs || runMinutes * 60000;
+        rounds = prog.rounds || 0;
+        splits = Array.isArray(prog.splits) ? prog.splits.filter(function (n) { return typeof n === 'number' && isFinite(n); }) : [];
+        lastMark = typeof prog.lastMark === 'number' ? prog.lastMark : 0;
+        lastSec = null;
+        lastTapAt = -Infinity;
+        currentRecordId = null;
+        savePending(null);
+        ensureAudio();
+        renderRounds();
+        if (prog.state === 'paused') {
+          remainingMs = Math.max(0, prog.remainingMs || 0);
+          setState('paused');
+          renderTime(remainingMs);
+          renderSplitInfo();
+          requestWakeLock();
+          saveProgress();
+          return;
+        }
+        unlockMedia();
+        endAt = typeof prog.endAt === 'number' ? prog.endAt : Date.now();
+        remainingMs = Math.max(0, timeLeft());
+        setState('running');
+        scheduleCues();
+        startTicking();          // 시간이 이미 끝났으면 첫 tick에서 바로 finish()
+        if (state === 'running') { requestWakeLock(); saveProgress(); }
+      }
+      function describeProgress(prog) {
+        var when = prog.savedAt ? fmtDate(prog.savedAt) : '';
+        var head = (prog.runMinutes || 20) + '분 AMRAP · ' + (prog.rounds || 0) + '라운드' + (when ? ' · ' + when + ' 저장' : '');
+        if (prog.state === 'paused') return head + '\n일시정지 상태, 남은 시간 ' + fmt(prog.remainingMs || 0);
+        var left = (prog.endAt || 0) - Date.now();
+        if (left <= 0) return head + '\n시간이 이미 끝났습니다. 이어서 하기를 누르면 기록으로 저장됩니다.';
+        return head + '\n진행 중, 남은 시간 ' + fmt(left);
       }
 
       function start() {
@@ -928,6 +1156,7 @@
         scheduleCues();
         startTicking();
         requestWakeLock();
+        saveProgress();
       }
       function pause() {
         if (state !== 'running') return;
@@ -939,31 +1168,43 @@
         setState('paused');
         renderTime(remainingMs);
         renderSplitInfo();
+        saveProgress();
         // 일시정지 중에도 화면은 켜 둔다 (재개 버튼을 바로 누를 수 있도록)
       }
       function resume() {
         if (state !== 'paused') return;
         ensureAudio();
+        unlockMedia();
         endAt = Date.now() + remainingMs;
         setState('running');
         scheduleCues();
         startTicking();
         requestWakeLock();
+        saveProgress();
       }
       function finish() {
         if (state !== 'running') return;
         stopTicking();
-        var armed = cues.length > 0;   // 종료음이 이미 예약되어 있으면 다시 울리지 않음
-        cues = [];
+        // 예약해 둔 종료음이 실제로 울렸는지 오디오 클록으로 확인한다. 전화·음악 앱 등으로
+        // 오디오가 멈춰 있었으면 예약음은 나지 않았으므로 지우고 지금 바로 울린다.
+        var played = cues.length > 0 && audioCtx && audioCtx.state === 'running' && audioCtx.currentTime >= cueFinishAt - 0.05;
+        if (!played) {
+          cancelCues();
+          var fc = ensureAudio();
+          if (fc) cues = safe(function () { return sfxFinishAt(fc, fc.currentTime + 0.03); }) || [];
+        }
         remainingMs = 0;
         lastSec = 0;
         renderTime(0);
-        currentRecordId = addRecord(rounds);
+        currentRecordId = addRecord(rounds, endAt);
         savePending(currentRecordId);
+        clearProgress();
+        // 종료음(약 2.7초)이 다 울린 뒤 오디오 세션을 놓아 준다 (멈췄던 음악이 다시 켜지도록)
+        if (mediaStopTimer) clearTimeout(mediaStopTimer);
+        mediaStopTimer = setTimeout(function () { mediaStopTimer = null; if (state === 'done') releaseAudioSession(); }, 4000);
         showResultCard();
         setState('done');
         renderHistory();
-        if (!armed) sfxFinish();
         if (!vibrate([400, 120, 400, 120, 800])) pendingVibe = [400, 120, 400, 120, 800];
         scheduleWakeRelease(DONE_WAKE_GRACE_MS);
       }
@@ -978,6 +1219,9 @@
         lastSec = null;
         currentRecordId = null;
         savePending(null);
+        clearProgress();
+        if (mediaStopTimer) { clearTimeout(mediaStopTimer); mediaStopTimer = null; }
+        releaseAudioSession();
         pendingVibe = null;
         renderRounds();
         renderTime(remainingMs);
@@ -998,6 +1242,7 @@
         lastMark = el;
         renderRounds();
         renderSplitInfo();
+        saveProgress();
         roundsEl.classList.remove('bump');
         void roundsEl.offsetWidth;
         roundsEl.classList.add('bump');
@@ -1013,6 +1258,7 @@
         if (splits.length) lastMark -= splits.pop();
         renderRounds();
         renderSplitInfo();
+        saveProgress();
         sfxUndo();
       }
       var flashTimer = null;
@@ -1034,6 +1280,7 @@
 
       // ---------- 버튼 ----------
       startBtn.addEventListener('click', function () {
+        if (modalOpen()) return;
         if (state === 'idle') beginCountdown();
         else if (state === 'countdown') cancelCountdown();
       });
@@ -1111,11 +1358,12 @@
 
       // ---------- 기록 ----------
       var lastSaveOk = true;
-      function addRecord(r) {
+      function addRecord(r, endedAt) {
         loadRecords();   // 다른 탭/창에서 바뀐 내용을 덮어쓰지 않도록 먼저 다시 읽는다
         var id = Date.now();
         while (records.some(function (x) { return x.id === id; })) id += 1;
-        var rec = { id: id, date: new Date().toISOString(), minutes: runMinutes, rounds: r, reps: 0, splits: splits.slice() };
+        var when = (typeof endedAt === 'number' && isFinite(endedAt) && endedAt <= Date.now()) ? endedAt : Date.now();
+        var rec = { id: id, date: new Date(when).toISOString(), minutes: runMinutes, rounds: r, reps: 0, splits: splits.slice() };
         records.unshift(rec);
         lastSaveOk = saveRecords();
         return rec.id;
@@ -1212,6 +1460,7 @@
           return d.getFullYear() + '. ' + (d.getMonth() + 1) + '. ' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
         }
       }
+      var openIds = {};   // 랩타임을 펼쳐 둔 기록 id (다시 그려도 유지)
       function renderHistory() {
         historyList.innerHTML = '';
         var best = bestIds();
@@ -1251,7 +1500,8 @@
           del.className = 'del';
           del.textContent = '×';
           del.setAttribute('aria-label', '기록 삭제');
-          del.addEventListener('click', function () {
+          del.addEventListener('click', function (e) {
+            e.stopPropagation();
             if (!del.classList.contains('confirm')) {
               del.classList.add('confirm');
               del.textContent = '삭제?';
@@ -1261,17 +1511,174 @@
               return;
             }
             records = records.filter(function (r) { return r.id !== rec.id; });
+            delete openIds[rec.id];
             if (rec.id === currentRecordId) { currentRecordId = null; savePending(null); showResultCard(); }
             saveRecords();
             renderHistory();
           });
 
+          var laps = document.createElement('div');
+          laps.className = 'laps';
+          var list = Array.isArray(rec.splits) ? rec.splits : [];
+          if (list.length) {
+            var mm2 = minMax(list), lo = mm2[0], hi = mm2[1];
+            list.forEach(function (ms, i) {
+              var c = document.createElement('span');
+              c.textContent = 'R' + (i + 1) + ' ' + fmtDur(ms);
+              if (list.length > 1 && ms === lo) c.className = 'fast';
+              else if (list.length > 1 && ms === hi) c.className = 'slow';
+              laps.appendChild(c);
+            });
+          } else {
+            var none = document.createElement('span');
+            none.className = 'none';
+            none.textContent = '랩타임 없음';
+            laps.appendChild(none);
+          }
+          if (openIds[rec.id]) li.classList.add('open');
+          li.addEventListener('click', function () {
+            var on = li.classList.toggle('open');
+            if (on) openIds[rec.id] = true; else delete openIds[rec.id];
+          });
+
           li.appendChild(left);
           li.appendChild(score);
           li.appendChild(del);
+          li.appendChild(laps);
           historyList.appendChild(li);
         });
       }
+
+      // ---------- 기록 내보내기 / 가져오기 (JSON 텍스트) ----------
+      function exportJSON() {
+        return JSON.stringify({ app: 'cindy-amrap', version: 1, exportedAt: new Date().toISOString(), minutes: minutes, records: records });
+      }
+      function importJSON(text) {
+        var data;
+        try { data = JSON.parse(text); } catch (e) { return { error: 'JSON 형식이 아닙니다.' }; }
+        var list = Array.isArray(data) ? data : (data && Array.isArray(data.records) ? data.records : null);
+        if (!list) return { error: '기록 목록(records)을 찾을 수 없습니다.' };
+        loadRecords();
+        function num(v) { return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) ? Number(v) : NaN; }
+        var have = {};
+        records.forEach(function (r) { have[r.id] = true; });
+        var toAdd = [];
+        var added = 0, skipped = 0, bad = 0, dropped = 0;
+        var room = MAX_RECORDS - records.length;
+        list.forEach(function (r) {
+          if (!r || typeof r !== 'object') { bad++; return; }
+          var rnd = num(r.rounds);
+          if (!isFinite(rnd)) { bad++; return; }
+          var date = (typeof r.date === 'string' && !isNaN(new Date(r.date).getTime())) ? r.date : null;
+          var givenId = num(r.id);
+          var id = (isFinite(givenId) && Math.abs(givenId) < 8.64e15) ? Math.round(givenId) : (date ? new Date(date).getTime() : Date.now());
+          while (have[id]) {
+            if (givenId === id) { skipped++; return; }
+            id += 1;
+          }
+          if (toAdd.length >= room) { dropped++; return; }
+          var d = new Date(date || id);
+          toAdd.push({
+            id: id,
+            date: isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString(),
+            minutes: clampInt(r.minutes, 1, 99, 20),
+            rounds: clampInt(rnd, 0, 999, 0),
+            reps: clampInt(r.reps, 0, 999, 0),
+            splits: Array.isArray(r.splits) ? r.splits.filter(function (n) { return typeof n === 'number' && isFinite(n) && n >= 0; }).slice(0, MAX_SPLITS) : []
+          });
+          have[id] = true;
+          added++;
+        });
+        records = records.concat(toAdd);
+        records.sort(function (a, b) { return (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0); });
+        var ok = saveRecords();
+        renderHistory();
+        if (state === 'done') showResultCard();
+        return { added: added, skipped: skipped, bad: bad, dropped: dropped, saved: ok };
+      }
+      function copyText(text) {
+        function fallback() {
+          try {
+            ioText.focus();
+            ioText.setSelectionRange(0, ioText.value.length);
+            return document.execCommand && document.execCommand('copy');
+          } catch (e) { return false; }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () { return fallback(); });
+        }
+        return Promise.resolve(fallback());
+      }
+      $('ioBtn').addEventListener('click', function () {
+        ioText.value = exportJSON();
+        ioStatus.textContent = records.length ? records.length + '개 기록이 담겨 있습니다.' : '아직 기록이 없습니다. 붙여넣고 가져오기를 누르면 됩니다.';
+        ioModal.hidden = false;
+      });
+      $('ioCopy').addEventListener('click', function () {
+        var text = ioText.value;
+        copyText(text).then(function (ok) {
+          ioStatus.textContent = ok ? '복사했습니다. 메모 앱 등에 붙여넣어 보관하세요.' : '자동 복사가 막혔습니다. 텍스트를 길게 눌러 직접 복사하세요.';
+          if (ok) showToast('복사됨');
+        });
+      });
+      $('ioImport').addEventListener('click', function () {
+        var r;
+        try { r = importJSON(ioText.value); } catch (e) { r = { error: '가져오는 중 오류가 났습니다: ' + (e && e.message ? e.message : e) }; }
+        if (r.error) { ioStatus.textContent = r.error; return; }
+        ioStatus.textContent = r.added + '개 가져옴' + (r.skipped ? ' · 이미 있는 기록 ' + r.skipped + '개 건너뜀' : '') + (r.bad ? ' · 형식 오류 ' + r.bad + '개 무시' : '') + (r.dropped ? ' · 저장 한도(' + MAX_RECORDS + '개) 초과 ' + r.dropped + '개 제외' : '') + (r.saved ? '' : ' · 저장 실패(저장소 사용 불가)');
+        if (r.added) showToast(r.added + '개 기록을 가져왔습니다');
+        ioText.value = exportJSON();
+      });
+      $('ioClose').addEventListener('click', function () { ioModal.hidden = true; });
+      ioModal.addEventListener('click', function (e) { if (e.target === ioModal) ioModal.hidden = true; });
+
+      // ---------- 이어하기 모달 ----------
+      var pendingProgress = null;
+      $('resumeYes').addEventListener('click', function () {
+        var shown = pendingProgress;
+        pendingProgress = null;
+        resumeModal.hidden = true;
+        // 모달을 띄운 뒤 다른 창에서 끝냈거나 버렸을 수 있으므로 저장소를 다시 읽는다
+        var fresh = loadProgress();
+        if (!fresh) { showToast('이 운동은 다른 창에서 이미 끝났거나 정리되었습니다.', 4000); return; }
+        if (shown && fresh.savedAt !== shown.savedAt && fresh.owner && fresh.owner !== shown.owner) {
+          showToast('다른 창에서 진행 중인 운동입니다. 그 창에서 이어서 하세요.', 4000);
+          return;
+        }
+        restoreProgress(fresh);
+      });
+      $('resumeNo').addEventListener('click', function () {
+        var shown = pendingProgress;
+        pendingProgress = null;
+        resumeModal.hidden = true;
+        var fresh = loadProgress();
+        // 다른 창이 그 사이 다시 저장했다면(진행 중) 지우지 않는다
+        if (!fresh || !shown || fresh.savedAt === shown.savedAt) clearProgress();
+      });
+      // 다른 창(탭·설치 앱)이 같은 운동을 이어받거나 끝내면 이 창은 물러난다
+      window.addEventListener('storage', function (e) {
+        if (e.key !== KEY_PROGRESS) return;
+        var p = loadProgress();
+        if (state === 'running' || state === 'paused') {
+          if (!p || (p.owner && p.owner !== INSTANCE)) {
+            stopTicking();
+            cancelCues();
+            stopMedia();
+            releaseWakeLock();
+            rounds = 0; splits = []; lastMark = 0; lastSec = null;
+            totalMs = minutes * 60000; remainingMs = totalMs;
+            renderRounds();
+            renderTime(remainingMs);
+            timeEl.classList.remove('warn', 'crit');
+            setState('idle');
+            renderHistory();
+            showToast(p ? '다른 창에서 이 운동을 이어받았습니다.' : '다른 창에서 이 운동을 끝냈습니다.', 5000);
+          }
+        } else if (!resumeModal.hidden) {
+          if (!p) { pendingProgress = null; resumeModal.hidden = true; }
+          else { pendingProgress = p; $('resumeInfo').textContent = describeProgress(p); }
+        }
+      });
 
       // ---------- Web Audio ----------
       function ensureAudio() {
@@ -1280,11 +1687,14 @@
         if (!audioCtx) {
           try { audioCtx = new Ctx(); } catch (e) { return null; }
           // iOS 17+: 무음 스위치가 켜져 있어도 알림음이 나도록 재생 세션으로 전환
-          try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+          try { if (navigator.audioSession) navigator.audioSession.type = overrideMute ? 'playback' : 'ambient'; } catch (e) {}
           try {
             audioCtx.addEventListener('statechange', function () {
-              // 전화·앱 전환 등 중단 뒤 다시 켜지면 남은 시간 기준으로 알림음을 다시 예약
-              if (audioCtx.state === 'running' && state === 'running') scheduleCues();
+              if (audioCtx.state !== 'running') return;
+              // 전화·앱 전환 등 중단 뒤 다시 켜지면 남은 시간 기준으로 알림음을 다시 예약하고,
+              // 운동 중이 아니면 멈춘 클록에 남아 있던 예약음이 뒤늦게 나지 않도록 지운다
+              if (state === 'running') scheduleCues();
+              else if (state !== 'done') cancelCues();
             });
           } catch (e) {}
         }
@@ -1312,6 +1722,7 @@
       function safe(fn) { try { return fn(); } catch (e) { return []; } }
       function sfxTap() {
         var ctx = ensureAudio(); if (!ctx) return;
+        if (mediaWanted && silentEl.paused) unlockMedia();
         safe(function () { tone(ctx, ctx.currentTime, 1400, 0.05, 0.35, 'square'); });
       }
       function sfxUndo() {
@@ -1369,6 +1780,7 @@
             if (left > k * 1000) list = list.concat(sfxCountAt(ctx, base + (left - k * 1000) / 1000, k));
           }
           list = list.concat(sfxFinishAt(ctx, base + left / 1000));
+          cueFinishAt = base + left / 1000;
           cues = list;
           return list;
         });
@@ -1380,6 +1792,60 @@
           try { n.osc.stop(0); } catch (e) {}
           try { n.g.disconnect(); } catch (e) {}
         });
+      }
+      // iOS: 무음 <audio>를 재생해 오디오 세션을 playback으로 바꾸면 무음 스위치가 켜져 있어도 알림음이 난다
+      function unlockMedia() {
+        if (!overrideMute) return;
+        mediaWanted = true;
+        try {
+          var p = silentEl.play();
+          if (p && p.catch) p.catch(function () {});
+        } catch (e) {}
+      }
+      function stopMedia() {
+        mediaWanted = false;
+        try { silentEl.pause(); silentEl.currentTime = 0; } catch (e) {}
+      }
+      // 전화·음악 앱 등이 오디오를 가져가 무음 오디오가 멈추면, 운동 중이면 다시 켠다
+      silentEl.addEventListener('pause', function () {
+        if (mediaWanted && (state === 'running' || state === 'countdown')) setTimeout(function () {
+          if (mediaWanted && (state === 'running' || state === 'countdown')) unlockMedia();
+        }, 500);
+      });
+      // 운동이 끝나면 무음 오디오를 멈추고 오디오 컨텍스트를 재워 iOS가 세션을 놓게 한다
+      function releaseAudioSession() {
+        stopMedia();
+        if (audioCtx && audioCtx.state === 'running') {
+          try { var p = audioCtx.suspend(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+        }
+      }
+      function applyMuteSetting(on) {
+        overrideMute = !!on;
+        $('overrideMute').checked = overrideMute;
+        try { localStorage.setItem(KEY_MUTE, overrideMute ? '1' : '0'); } catch (e) {}
+        try { if (navigator.audioSession) navigator.audioSession.type = overrideMute ? 'playback' : 'ambient'; } catch (e) {}
+        if (!overrideMute) stopMedia();
+        else if (state === 'running' || state === 'countdown') unlockMedia();
+      }
+      $('overrideMute').addEventListener('change', function () { applyMuteSetting($('overrideMute').checked); });
+      var toastTimer = null;
+      var toastAction = null;
+      function showToast(msg, ms, onClick) {
+        toastEl.textContent = msg;
+        toastEl.hidden = false;
+        toastAction = onClick || null;
+        toastEl.classList.toggle('action', !!onClick);
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { toastEl.hidden = true; toastTimer = null; toastAction = null; }, ms || 2500);
+      }
+      toastEl.addEventListener('click', function () {
+        var fn = toastAction;
+        toastAction = null;
+        toastEl.hidden = true;
+        if (fn) fn();
+      });
+      function modalOpen() {
+        return !!document.querySelector('.modal:not([hidden])');
       }
       function vibrate(p) {
         if (!navigator.vibrate) return false;
@@ -1414,9 +1880,10 @@
         if (document.visibilityState !== 'visible') return;
         if (state === 'running') {
           ensureAudio();
+          if (mediaWanted && silentEl.paused) unlockMedia();
           tick();
           if (state === 'running') { scheduleCues(); requestWakeLock(); }
-        } else if (state === 'paused') {
+        } else if (state === 'paused' || state === 'countdown') {
           requestWakeLock();
         }
         if (state === 'done' && pendingVibe) {
@@ -1425,12 +1892,15 @@
       });
 
       // ---------- 제스처 차단 ----------
-      document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      document.addEventListener('contextmenu', function (e) {
+        if (e.target && e.target.closest && e.target.closest('textarea, input')) return;
+        e.preventDefault();
+      });
       document.addEventListener('dblclick', function (e) { e.preventDefault(); });
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
       document.addEventListener('touchmove', function (e) {
-        if (state === 'running' || state === 'paused') { e.preventDefault(); return; }
-        if (!settingsEl.hidden) return;
+        if (modalOpen()) return;
+        if (state === 'running' || state === 'paused' || state === 'countdown') { e.preventDefault(); return; }
         var a = document.activeElement;
         if (a && a.tagName === 'INPUT') return;
         if (e.target && e.target.closest && e.target.closest('[data-scroll]')) return;
@@ -1452,7 +1922,7 @@
       document.addEventListener('keydown', function (e) {
         var tag = (e.target && e.target.tagName) || '';
         if (tag === 'INPUT') return;
-        if (!settingsEl.hidden) return;
+        if (modalOpen()) return;
         if (e.code === 'Space') { e.preventDefault(); if (state === 'running') addRound(performance.now()); }
         else if (e.key === 'Enter' && state === 'idle') beginCountdown();
         else if (e.key === 'Escape' && state === 'countdown') cancelCountdown();
@@ -1460,17 +1930,80 @@
         else if (e.key === 'Backspace') undoRound();
       });
 
+      // ---------- 오프라인: 서비스워커 + 새 버전 확인 ----------
+      var SW_CACHE = 'cindy-amrap-v1';   // sw.js의 CACHE와 같아야 한다
+      var updateToastShown = false;
+      var updateReady = false;
+      function offerUpdate() {
+        if (updateToastShown) return;
+        if (state !== 'idle' && state !== 'done') { updateReady = true; return; }   // 운동이 끝난 뒤에 안내
+        updateToastShown = true;
+        showToast('새 버전이 준비되었습니다. 여기를 누르면 바로 적용됩니다.', 8000, function () { location.reload(); });
+      }
+      // 서비스워커는 index.html을 캐시 우선으로 주므로, 페이지가 직접 서버 최신본과 비교해 캐시를 갱신하고 안내한다
+      function checkForUpdate() {
+        if (!('caches' in window) || !/^https?:$/.test(location.protocol)) return;
+        var key = new URL('index.html', location.href).href;
+        Promise.all([
+          caches.open(SW_CACHE).then(function (c) { return c.match(key); }).then(function (r) { return r ? r.text() : null; }),
+          fetch('index.html?fresh=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; })
+        ]).then(function (pair) {
+          var cached = pair[0], fresh = pair[1];
+          if (!fresh || cached === fresh) return;
+          return caches.open(SW_CACHE).then(function (c) {
+            return c.put(key, new Response(fresh, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
+          }).then(function () {
+            if (cached !== null) offerUpdate();
+          });
+        }).catch(function () {});
+      }
+      if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('sw.js').then(function (reg) {
+            reg.addEventListener('updatefound', function () {
+              var nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener('statechange', function () {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) offerUpdate();
+              });
+            });
+            return navigator.serviceWorker.ready;
+          }).then(function () { checkForUpdate(); }).catch(function () {});
+        });
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'visible' && (state === 'idle' || state === 'done')) checkForUpdate();
+        });
+      }
+
       // ---------- 초기화 ----------
       loadMinutes();
       loadRecords();
       applyMinutes(minutes);
+      try { overrideMute = localStorage.getItem(KEY_MUTE) !== '0'; } catch (e) {}
+      $('overrideMute').checked = overrideMute;
       renderHistory();
       var pending = loadPending();
       var pendingRec = null;
       if (pending !== null) {
         records.forEach(function (r) { if (r.id === pending) pendingRec = r; });
       }
-      if (pendingRec) {
+      var prog = loadProgress();
+      if (prog) {
+        // 실행 중이던 운동: 이어서 할지 묻는다 (오디오 해제를 위해 버튼 제스처가 필요)
+        try {
+          pendingProgress = prog;
+          $('resumeInfo').textContent = describeProgress(prog);
+          renderRounds();
+          setState('idle');
+          resumeModal.hidden = false;
+        } catch (e) {
+          pendingProgress = null;
+          resumeModal.hidden = true;
+          clearProgress();
+          renderRounds();
+          setState('idle');
+        }
+      } else if (pendingRec) {
         // 완료 직후 페이지가 다시 열린 경우: 결과 화면을 복원해 횟수를 이어서 입력할 수 있게 한다
         currentRecordId = pendingRec.id;
         rounds = pendingRec.rounds;
