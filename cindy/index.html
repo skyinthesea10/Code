@@ -164,8 +164,17 @@
       transition: transform 0.08s ease;
     }
     #rounds.bump { transform: scale(1.06); }
+    #splitInfo {
+      margin-top: 6px;
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      min-height: 1.3em;
+    }
+    #splitInfo b { color: var(--fg); font-weight: 600; }
     #hint {
-      margin-top: 10px;
+      margin-top: 6px;
       padding: 0 28px;
       text-align: center;
       font-size: 0.85rem;
@@ -210,6 +219,38 @@
       gap: 10px;
     }
     #result .row + .row { margin-top: 6px; }
+    #stats {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #stats .stat {
+      flex: 1 1 30%;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 10px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+    #stats .stat .v { font-family: var(--mono); font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    #stats .stat .k { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+    #splits {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    #splits span {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 8px;
+      padding: 4px 7px;
+      font-variant-numeric: tabular-nums;
+    }
+    #splits span.fast { color: var(--green); }
+    #splits span.slow { color: var(--amber); }
+    #historyList .avg { color: var(--muted); font-size: 0.72rem; font-family: var(--mono); }
     #result .lbl { font-size: 0.95rem; color: var(--muted); }
     .stepper {
       display: flex;
@@ -494,6 +535,7 @@
     <div id="pausedBadge">일시정지 · 탭 잠김</div>
     <div class="rounds-label">ROUNDS</div>
     <div id="rounds">0</div>
+    <div id="splitInfo"></div>
     <div id="hint">시작을 누른 뒤 화면 아무 곳이나 탭하면 라운드가 올라갑니다</div>
   </main>
 
@@ -515,6 +557,8 @@
         <button id="repsPlus" type="button" aria-label="추가 횟수 +1">+</button>
       </div>
     </div>
+    <div id="stats"></div>
+    <div id="splits"></div>
     <div class="saved" id="savedNote">기록이 저장되었습니다. 마지막 부분 라운드의 횟수를 입력하세요.</div>
   </section>
 
@@ -584,6 +628,9 @@
       var historyList = $('historyList');
       var historyEmpty = $('historyEmpty');
       var historyCount = $('historyCount');
+      var splitInfoEl = $('splitInfo');
+      var statsEl = $('stats');
+      var splitsEl = $('splits');
 
       // ---------- 상수 ----------
       var KEY_MIN = 'cindy-amrap-minutes';
@@ -604,6 +651,8 @@
       var endAt = 0;               // Date.now() 기준 종료 시각 (절전 중에도 흐르는 벽시계)
       var lastSec = null;          // 마지막으로 렌더한 남은 초
       var rounds = 0;
+      var splits = [];             // 라운드마다 걸린 시간(ms), 일시정지 시간 제외
+      var lastMark = 0;            // 마지막 라운드를 마친 시점의 경과 시간(ms)
       var lastTapAt = -Infinity;   // performance.now() 기준 (디바운스용)
       var tickId = null;
       var wakeLock = null;
@@ -670,11 +719,65 @@
       function renderRounds() {
         roundsEl.textContent = rounds;
       }
+      function fmtDur(ms) {
+        var s = Math.round(ms / 1000);
+        return Math.floor(s / 60) + ':' + pad(s % 60);
+      }
+      // 실행·일시정지·완료 상태에서의 경과 시간 (일시정지 동안은 흐르지 않음)
+      function elapsedMs() {
+        if (state === 'running') return Math.min(totalMs, Math.max(0, totalMs - timeLeft()));
+        if (state === 'paused') return totalMs - remainingMs;
+        if (state === 'done') return totalMs;
+        return 0;
+      }
+      function avgSplit(list) {
+        if (!list || !list.length) return null;
+        var sum = 0;
+        for (var i = 0; i < list.length; i++) sum += list[i];
+        return sum / list.length;
+      }
+      function renderSplitInfo() {
+        if (state !== 'running' && state !== 'paused') { splitInfoEl.textContent = ''; return; }
+        var cur = elapsedMs() - lastMark;
+        var html = '이번 <b>' + fmtDur(cur) + '</b>';
+        if (splits.length) {
+          html += ' · 지난 <b>' + fmtDur(splits[splits.length - 1]) + '</b>';
+          html += ' · 평균 <b>' + fmtDur(avgSplit(splits)) + '</b>';
+        }
+        splitInfoEl.innerHTML = html;
+      }
+      function renderStats(list) {
+        statsEl.innerHTML = '';
+        splitsEl.innerHTML = '';
+        if (!list || !list.length) {
+          statsEl.innerHTML = '<div class="stat"><div class="v">-</div><div class="k">라운드 시간 기록 없음</div></div>';
+          return;
+        }
+        var avg = avgSplit(list);
+        var best = Math.min.apply(null, list);
+        var worst = Math.max.apply(null, list);
+        [[fmtDur(avg), '라운드 평균'], [fmtDur(best), '가장 빠름'], [fmtDur(worst), '가장 느림']].forEach(function (p) {
+          var d = document.createElement('div');
+          d.className = 'stat';
+          d.innerHTML = '<div class="v"></div><div class="k"></div>';
+          d.firstChild.textContent = p[0];
+          d.lastChild.textContent = p[1];
+          statsEl.appendChild(d);
+        });
+        list.forEach(function (ms, i) {
+          var c = document.createElement('span');
+          c.textContent = 'R' + (i + 1) + ' ' + fmtDur(ms);
+          if (list.length > 1 && ms === best) c.className = 'fast';
+          else if (list.length > 1 && ms === worst) c.className = 'slow';
+          splitsEl.appendChild(c);
+        });
+      }
       function setState(next) {
         state = next;
         body.setAttribute('data-state', next);
         pauseBtn.setAttribute('aria-label', next === 'paused' ? '재개' : '일시정지');
         resetLabel.textContent = (next === 'done') ? '새 운동' : '리셋';
+        renderSplitInfo();
         switch (next) {
           case 'idle':
             hintEl.textContent = '시작을 누른 뒤 화면 아무 곳이나 탭하면 라운드가 올라갑니다';
@@ -704,6 +807,7 @@
           var prev = lastSec;
           lastSec = sec;
           renderTime(left);
+          renderSplitInfo();
           document.title = fmt(left) + ' · ' + rounds + 'R';
           // 소리는 오디오 클록에 예약되어 있으므로 여기서는 진동만 (소리 없는 기기 대비)
           if (prev !== null) {
@@ -729,6 +833,8 @@
         totalMs = minutes * 60000;
         remainingMs = totalMs;
         rounds = 0;
+        splits = [];
+        lastMark = 0;
         lastSec = null;
         lastTapAt = -Infinity;
         renderRounds();
@@ -748,6 +854,7 @@
         cancelCues();
         setState('paused');
         renderTime(remainingMs);
+        renderSplitInfo();
         // 일시정지 중에도 화면은 켜 둔다 (재개 버튼을 바로 누를 수 있도록)
       }
       function resume() {
@@ -782,6 +889,8 @@
         totalMs = minutes * 60000;
         remainingMs = totalMs;
         rounds = 0;
+        splits = [];
+        lastMark = 0;
         lastSec = null;
         currentRecordId = null;
         savePending(null);
@@ -800,7 +909,11 @@
         if (now - lastTapAt < TAP_DEBOUNCE_MS) return;
         lastTapAt = now;
         rounds += 1;
+        var el = elapsedMs();
+        splits.push(el - lastMark);
+        lastMark = el;
         renderRounds();
+        renderSplitInfo();
         roundsEl.classList.remove('bump');
         void roundsEl.offsetWidth;
         roundsEl.classList.add('bump');
@@ -813,7 +926,9 @@
         if (state !== 'running' && state !== 'paused') return;
         if (rounds <= 0) return;
         rounds -= 1;
+        if (splits.length) lastMark -= splits.pop();
         renderRounds();
+        renderSplitInfo();
         sfxUndo();
       }
       var flashTimer = null;
@@ -913,7 +1028,7 @@
         loadRecords();   // 다른 탭/창에서 바뀐 내용을 덮어쓰지 않도록 먼저 다시 읽는다
         var id = Date.now();
         while (records.some(function (x) { return x.id === id; })) id += 1;
-        var rec = { id: id, date: new Date().toISOString(), minutes: runMinutes, rounds: r, reps: 0 };
+        var rec = { id: id, date: new Date().toISOString(), minutes: runMinutes, rounds: r, reps: 0, splits: splits.slice() };
         records.unshift(rec);
         lastSaveOk = saveRecords();
         return rec.id;
@@ -946,6 +1061,7 @@
       function syncResultCard() {
         var rec = currentRecord();
         var reps = rec ? (rec.reps || 0) : 0;
+        renderStats(rec ? rec.splits : splits);
         finalRounds.textContent = rounds;
         finalReps.textContent = reps;
         roundsInput.value = rounds;
@@ -1035,6 +1151,13 @@
           var score = document.createElement('div');
           score.className = 'score';
           score.textContent = rec.rounds + 'R' + (rec.reps ? ' + ' + rec.reps : '');
+          var a = avgSplit(rec.splits);
+          if (a !== null) {
+            var avgEl = document.createElement('div');
+            avgEl.className = 'avg';
+            avgEl.textContent = '평균 ' + fmtDur(a) + '/R';
+            left.appendChild(avgEl);
+          }
 
           var del = document.createElement('button');
           del.type = 'button';
@@ -1263,6 +1386,8 @@
         // 완료 직후 페이지가 다시 열린 경우: 결과 화면을 복원해 횟수를 이어서 입력할 수 있게 한다
         currentRecordId = pendingRec.id;
         rounds = pendingRec.rounds;
+        splits = Array.isArray(pendingRec.splits) ? pendingRec.splits.slice() : [];
+        totalMs = (pendingRec.minutes || 20) * 60000;
         remainingMs = 0;
         renderRounds();
         renderTime(0);
