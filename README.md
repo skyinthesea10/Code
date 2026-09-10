@@ -1,24 +1,12 @@
-# 운동 타이머 모음
+# Cindy AMRAP 타이머
 
-외부 라이브러리 없이 HTML 파일 하나로 동작하는 운동용 타이머입니다. 휴대폰 세로 화면, 다크 모드 기준으로 만들었습니다.
+외부 라이브러리 없이 `cindy/index.html` 파일 하나로 동작하는 크로스핏 Cindy용 20분 AMRAP 타이머 + 라운드 카운터입니다. 휴대폰 세로 화면, 다크 모드, 한 손 조작 기준으로 만들었습니다.
 
-| 앱 | 파일 | 용도 |
-| --- | --- | --- |
-| 운동 타이머 | `index.html` | 20분 카운트다운 (기본형) |
-| Cindy AMRAP | `cindy/index.html` | 20분 AMRAP 타이머 + 라운드 카운터 + 기록 |
+루트의 `index.html`은 `cindy/`로 넘겨주는 이동 페이지입니다.
 
-## 1. 운동 타이머 (`index.html`)
+## 기능
 
-- 기본 20분 카운트다운, 큰 숫자 표시 + 원형 진행 표시
-- 시작 / 일시정지 / 리셋 버튼 (숫자 영역을 탭해도 시작·일시정지)
-- 운동 시간(분) 변경 입력칸 (1~180분, 마지막 설정값 자동 저장)
-- 종료 시 Web Audio API로 생성한 알림음 + 화면이 붉게 깜빡임 + 진동(지원 기기)
-- 동작 중 Screen Wake Lock API로 화면 꺼짐 방지
-- 키보드: `Space` 시작/일시정지, `R` 리셋
-
-## 2. Cindy AMRAP (`cindy/index.html`)
-
-크로스핏 Cindy(5 풀업 · 10 푸시업 · 15 스쿼트, 20분 AMRAP)용 타이머와 라운드 카운터입니다.
+Cindy: 5 풀업 · 10 푸시업 · 15 스쿼트, 20분 AMRAP.
 
 **타이머**
 - 상단 20:00 카운트다운. 톱니 버튼 → 설정에서 분 단위로 변경(10/15/20/30분 프리셋 또는 직접 입력)
@@ -52,7 +40,7 @@
 
 ## 로컬에서 열기
 
-각 `index.html`을 브라우저에서 바로 열면 됩니다. 단, 화면 꺼짐 방지(Wake Lock)는 **HTTPS 또는 localhost**에서만 동작하므로 휴대폰에서 실제로 쓰려면 아래 GitHub Pages 배포를 권장합니다.
+`cindy/index.html`을 브라우저에서 바로 열면 됩니다. 단, 화면 꺼짐 방지(Wake Lock)는 **HTTPS 또는 localhost**에서만 동작하므로 휴대폰에서 실제로 쓰려면 아래 GitHub Pages 배포를 권장합니다.
 
 같은 Wi-Fi의 휴대폰에서 미리 보려면 저장소 폴더에서 로컬 서버를 띄웁니다.
 
@@ -73,11 +61,11 @@ python3 -m http.server 8000
 
 ### 1. 파일 올리기
 
-`index.html`, `cindy/index.html`, `README.md`가 저장소에 있는 상태로 배포할 브랜치에 푸시합니다.
+`cindy/index.html`(과 이동용 `index.html`, `README.md`)이 저장소에 있는 상태로 배포할 브랜치에 푸시합니다.
 
 ```bash
 git add index.html cindy/index.html README.md
-git commit -m "Add workout timers"
+git commit -m "Add Cindy AMRAP timer"
 git push -u origin main
 ```
 
@@ -96,11 +84,11 @@ git push -u origin main
 1~2분 뒤 아래 주소에서 열립니다. Settings → Pages 화면 상단에도 실제 주소가 표시됩니다.
 
 ```
-기본 타이머 : https://<사용자명>.github.io/<저장소>/
-Cindy AMRAP: https://<사용자명>.github.io/<저장소>/cindy/
+https://<사용자명>.github.io/<저장소>/cindy/
 ```
 
 예) 사용자명 `skyinthesea10`, 저장소 `Code` → `https://skyinthesea10.github.io/Code/cindy/`
+루트 주소(`https://<사용자명>.github.io/<저장소>/`)로 들어가도 자동으로 `cindy/`로 넘어갑니다.
 
 ### 4. 휴대폰 홈 화면에 추가 (권장)
 
