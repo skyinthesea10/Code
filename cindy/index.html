@@ -1517,7 +1517,7 @@
         if (!rec || !step) return;
         if (id === currentRecordId) {
           // 지금 결과 카드에 떠 있는 기록이면 카드·큰 숫자·제목도 함께 맞춘다
-          if (field === 'rounds') setRounds(rounds + step);
+          if (field === 'rounds') setRounds(rec.rounds + step);   // 다른 탭에서 바뀌었을 수 있으니 저장된 값 기준
           else setReps((rec.reps || 0) + step);
           return;
         }
@@ -2130,7 +2130,12 @@
         if (e.key !== KEY_REC) return;
         loadRecords();
         renderHistory();
-        if (state === 'done') showResultCard();
+        if (state === 'done') {
+          // 결과 카드의 기록이 다른 탭에서 바뀌었으면 큰 숫자·카드도 그 값으로 맞춘다
+          var cur = currentRecord();
+          if (cur) { rounds = cur.rounds; renderRounds(); }
+          showResultCard();
+        }
       });
       window.addEventListener('beforeunload', function (e) {
         if (state === 'running' || state === 'paused' || state === 'countdown') { e.preventDefault(); e.returnValue = ''; }
@@ -2143,6 +2148,8 @@
         var tag = (e.target && e.target.tagName) || '';
         if (tag === 'INPUT') return;
         if (modalOpen()) return;
+        // 기록 목록의 버튼(수정 스테퍼·삭제)에 포커스가 있으면 Enter/Space는 그 버튼을 누르는 데 쓴다
+        if (tag === 'BUTTON' && e.target.closest('#historyList')) return;
         if (e.code === 'Space') { e.preventDefault(); if (state === 'running') addRound(performance.now()); }
         // preventDefault: 포커스가 남아 있는 버튼(취소·내보내기 등)이 같은 Enter로 눌리지 않게 한다
         else if (e.key === 'Enter' && state === 'idle') { e.preventDefault(); beginCountdown(); }
