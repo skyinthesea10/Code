@@ -373,7 +373,8 @@
       left: 50%;
       bottom: calc(96px + env(safe-area-inset-bottom));
       transform: translateX(-50%);
-      max-width: calc(100% - 40px);
+      width: max-content;            /* left: 50% 때문에 폭이 화면 절반으로 줄지 않게, 내용만큼 넓히고 */
+      max-width: calc(100% - 40px);  /* 화면 좌우 20px 안에서 줄바꿈 */
       background: var(--panel-2);
       color: var(--fg);
       border: 1px solid var(--line);
