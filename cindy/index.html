@@ -9,6 +9,13 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Cindy">
+  <meta name="description" content="크로스핏 Cindy용 20분 AMRAP 타이머 + 라운드 카운터. 화면 아무 곳이나 탭해 라운드를 세고, 랩타임과 기록을 기기에 저장합니다.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Cindy AMRAP">
+  <meta property="og:description" content="크로스핏 Cindy용 20분 AMRAP 타이머 + 라운드 카운터. 화면 아무 곳이나 탭해 라운드를 세고, 랩타임과 기록을 기기에 저장합니다.">
+  <meta property="og:url" content="https://skyinthesea10.github.io/Code/cindy/">
+  <meta property="og:image" content="https://skyinthesea10.github.io/Code/cindy/icon-512.png">
+  <meta property="og:locale" content="ko_KR">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -55,9 +62,14 @@
       overscroll-behavior: none;
       display: flex;
       flex-direction: column;
-      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);   /* 좌우는 가로 화면의 노치 대응 */
       transition: background-color 0.35s ease;
+      /* 한글은 어절 단위로만 줄바꿈하고, 화면보다 긴 문자열만 예외로 끊는다 */
+      word-break: keep-all;
+      overflow-wrap: anywhere;
     }
+    /* 안내문은 줄 길이를 고르게 나눠 마지막 줄에 한두 글자만 남지 않게 한다 */
+    #hint, .note, #result .saved, #historyEmpty, #resumeInfo, .sheet h2, #toast { text-wrap: balance; }
     [data-scroll] {
       overflow-y: auto;
       touch-action: pan-y;
@@ -292,6 +304,30 @@
     #historyList .laps span.fast { color: var(--green); }
     #historyList .laps span.slow { color: var(--amber); }
     #historyList .laps .none { color: var(--muted); background: none; padding-left: 0; }
+    /* 펼친 기록의 라운드·추가 횟수 수정 */
+    #historyList .edit {
+      grid-column: 1 / -1;
+      display: none;
+      padding: 4px 0 2px;
+      cursor: default;
+    }
+    #historyList li.open .edit { display: block; }
+    #historyList .edit .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    #historyList .edit .row + .row { margin-top: 6px; }
+    #historyList .edit .lbl { font-size: 0.85rem; color: var(--muted); }
+    #historyList .edit .val {
+      min-width: 44px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 1.15rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
     #history h2 .tools { display: flex; align-items: center; gap: 10px; }
     .mini {
       height: 28px;
@@ -321,6 +357,7 @@
       -webkit-user-select: text;
       touch-action: pan-y;
       margin-bottom: 10px;
+      word-break: break-all;   /* 공백 없는 긴 JSON은 글자 단위로 끊는다 */
     }
     textarea:focus { border-color: var(--accent); }
     .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
@@ -612,7 +649,7 @@
     /* 종료: 배경이 붉게 바뀌고 잠시 깜빡임 */
     body[data-state="done"] {
       background: #5a1a1f;
-      animation: doneFlash 0.6s ease-in-out 5 alternate;
+      animation: doneFlash 0.6s ease-in-out 6 alternate;   /* 짝수 번이어야 어두운 색에서 끝나 마지막에 색이 튀지 않는다 */
     }
     @keyframes doneFlash {
       from { background-color: #5a1a1f; }
@@ -672,7 +709,7 @@
       <span class="lbl">추가 횟수</span>
       <div class="stepper">
         <button id="repsMinus" type="button" aria-label="추가 횟수 −1">−</button>
-        <input id="repsInput" type="number" inputmode="numeric" min="0" max="999" value="0" aria-label="마지막 부분 라운드 추가 횟수">
+        <input id="repsInput" type="number" inputmode="numeric" min="0" max="29" value="0" aria-label="마지막 부분 라운드 추가 횟수">
         <button id="repsPlus" type="button" aria-label="추가 횟수 +1">+</button>
       </div>
     </div>
@@ -794,7 +831,10 @@
       var TICK_MS = 50;
       var MAX_RECORDS = 500;
       var MAX_SPLITS = 5000;      // 20분에 300ms 디바운스로는 4000라운드를 넘을 수 없다
+      var MAX_REPS = 29;          // Cindy 1라운드는 30회(5+10+15)라 부분 라운드의 추가 횟수는 0~29
       var DONE_WAKE_GRACE_MS = 3 * 60 * 1000;
+      var PAUSE_WAKE_GRACE_MS = 10 * 60 * 1000;   // 일시정지 중 화면을 켜 두는 시간
+      var PENDING_MAX_AGE_MS = 60 * 60 * 1000;    // 완료 화면은 종료 시각에서 60분까지만 유지·복원
 
       // ---------- 상태 ----------
       var state = 'idle';          // idle | countdown | running | paused | done
@@ -834,6 +874,7 @@
       var INSTANCE = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 이 창(탭)의 식별자
       var records = [];
       var currentRecordId = null;
+      var doneAt = 0;              // 완료 화면의 기준 시각: 화면이 뜬 때(복원한 경우는 기록의 종료 시각)
 
       // ---------- 저장소 ----------
       function loadMinutes() {
@@ -946,6 +987,12 @@
           if (list[i] > hi) hi = list[i];
         }
         return [lo, hi];
+      }
+      // 라운드 수를 손으로 고친 기록은 랩타임 개수와 어긋날 수 있다. 저장된 splits는 그대로 두고,
+      // 통계·랩 칩·목록 평균을 계산·표시할 때는 앞에서 rounds개까지만 쓴다
+      function usedSplits(list, n) {
+        if (!Array.isArray(list)) return [];
+        return (n >= 0 && list.length > n) ? list.slice(0, n) : list;
       }
       function renderSplitInfo() {
         if (state !== 'running' && state !== 'paused') { splitInfoEl.textContent = ''; return; }
@@ -1117,6 +1164,7 @@
           renderTime(remainingMs);
           renderSplitInfo();
           requestWakeLock();
+          scheduleWakeRelease(PAUSE_WAKE_GRACE_MS);   // requestWakeLock()이 해제 타이머를 지우므로 그 뒤에 건다
           saveProgress();
           return;
         }
@@ -1169,7 +1217,9 @@
         renderTime(remainingMs);
         renderSplitInfo();
         saveProgress();
-        // 일시정지 중에도 화면은 켜 둔다 (재개 버튼을 바로 누를 수 있도록)
+        // 일시정지 중에도 화면은 켜 두되(재개 버튼을 바로 누를 수 있도록), 10분이 지나면 배터리를 위해 놓는다.
+        // 재개하면 resume()의 requestWakeLock()이 다시 요청한다
+        scheduleWakeRelease(PAUSE_WAKE_GRACE_MS);
       }
       function resume() {
         if (state !== 'paused') return;
@@ -1198,6 +1248,7 @@
         renderTime(0);
         currentRecordId = addRecord(rounds, endAt);
         savePending(currentRecordId);
+        doneAt = Date.now();
         clearProgress();
         // 종료음(약 2.7초)이 다 울린 뒤 오디오 세션을 놓아 준다 (멈췄던 음악이 다시 켜지도록)
         if (mediaStopTimer) clearTimeout(mediaStopTimer);
@@ -1251,7 +1302,8 @@
         sfxTap();
         vibrate(18);
       }
-      function undoRound() {
+      // silent === true: 취소된 터치를 되돌릴 때처럼 효과음 없이 되돌린다
+      function undoRound(silent) {
         if (state !== 'running' && state !== 'paused') return;
         if (rounds <= 0) return;
         rounds -= 1;
@@ -1259,7 +1311,7 @@
         renderRounds();
         renderSplitInfo();
         saveProgress();
-        sfxUndo();
+        if (silent !== true) sfxUndo();
       }
       var flashTimer = null;
       function flash() {
@@ -1271,11 +1323,33 @@
       }
 
       // 화면 전체 탭: 컨트롤(data-nocount) 위가 아니면 라운드 +1
+      var tapPointerId = null;     // 방금 라운드를 올린 터치(마우스 제외). 취소로 끝나면 그 라운드를 되돌린다
+      var tapRounds = 0;           // 그 터치 직후의 라운드 수 (그 사이 다른 조작이 있었으면 되돌리지 않는다)
+      var tapPrevAt = -Infinity;   // 그 터치 전의 lastTapAt
       document.addEventListener('pointerdown', function (e) {
         if (state !== 'running') return;
         if (!e.isPrimary) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;   // 우클릭·휠클릭은 세지 않는다
         if (e.target && e.target.closest && e.target.closest('[data-nocount]')) return;
+        var before = rounds;
+        var prevAt = lastTapAt;
         addRound(performance.now());
+        if (rounds > before && e.pointerType !== 'mouse') {
+          tapPointerId = e.pointerId;
+          tapRounds = rounds;
+          tapPrevAt = prevAt;
+        }
+      }, { passive: true });
+      document.addEventListener('pointerup', function (e) {
+        if (e.pointerId === tapPointerId) tapPointerId = null;
+      }, { passive: true });
+      // 시스템 제스처 등으로 터치가 취소되면(pointercancel) 그 터치로 올라간 라운드를 소리 없이 되돌린다
+      document.addEventListener('pointercancel', function (e) {
+        if (e.pointerId !== tapPointerId) return;
+        tapPointerId = null;
+        if (rounds !== tapRounds) return;
+        undoRound(true);
+        if (rounds === tapRounds - 1) lastTapAt = tapPrevAt;   // 되돌린 탭이 다음 탭의 디바운스를 막지 않게
       }, { passive: true });
 
       // ---------- 버튼 ----------
@@ -1366,7 +1440,21 @@
         var rec = { id: id, date: new Date(when).toISOString(), minutes: runMinutes, rounds: r, reps: 0, splits: splits.slice() };
         records.unshift(rec);
         lastSaveOk = saveRecords();
+        askPersist();
         return rec.id;
+      }
+      // 기록을 처음 저장할 때(세션에 한 번) 브라우저에 저장소를 지우지 말아 달라고 요청한다. 지원하지 않거나 거부돼도 그대로 둔다
+      var persistAsked = false;
+      function askPersist() {
+        if (persistAsked) return;
+        persistAsked = true;
+        try {
+          var sm = navigator.storage;
+          if (!sm || !sm.persist) return;
+          var ask = function () { var p = sm.persist(); if (p && p.catch) p.catch(function () {}); };
+          if (!sm.persisted) { ask(); return; }
+          sm.persisted().then(function (already) { if (!already) ask(); }).catch(function () {});
+        } catch (e) {}
       }
       function showResultCard() {
         var rec = currentRecord();
@@ -1382,11 +1470,14 @@
         }
         syncResultCard();
       }
-      function currentRecord() {
+      function recordById(id) {
         for (var i = 0; i < records.length; i++) {
-          if (records[i].id === currentRecordId) return records[i];
+          if (records[i].id === id) return records[i];
         }
         return null;
+      }
+      function currentRecord() {
+        return recordById(currentRecordId);
       }
       function clampInt(v, lo, hi, fallback) {
         v = parseInt(v, 10);
@@ -1396,7 +1487,7 @@
       function syncResultCard() {
         var rec = currentRecord();
         var reps = rec ? (rec.reps || 0) : 0;
-        renderStats(rec ? rec.splits : splits);
+        renderStats(rec ? usedSplits(rec.splits, rec.rounds) : usedSplits(splits, rounds));
         finalRounds.textContent = rounds;
         finalReps.textContent = reps;
         roundsInput.value = rounds;
@@ -1407,17 +1498,32 @@
         if (!rec) return;
         rounds = clampInt(v, 0, 999, rounds);
         renderRounds();
-        rec.rounds = rounds; saveRecords(); renderHistory();
+        rec.rounds = rounds; saveRecords(); refreshRows(rec.id);
         syncResultCard();
         document.title = '완료 ' + rounds + 'R · Cindy AMRAP';
       }
       function setReps(v) {
         var rec = currentRecord();
         if (!rec) return;
-        var reps = clampInt(v, 0, 999, rec.reps || 0);
-        rec.reps = reps; saveRecords(); renderHistory();
+        var reps = clampInt(v, 0, MAX_REPS, rec.reps || 0);
+        rec.reps = reps; saveRecords(); refreshRows(rec.id);
         finalReps.textContent = reps;
         repsInput.value = reps;
+      }
+      // 기록 목록의 스테퍼로 지난 기록의 라운드·추가 횟수를 고친다 (바꾸면 바로 저장)
+      function editRecord(id, field, step) {
+        var rec = recordById(id);
+        if (!rec || !step) return;
+        if (id === currentRecordId) {
+          // 지금 결과 카드에 떠 있는 기록이면 카드·큰 숫자·제목도 함께 맞춘다
+          if (field === 'rounds') setRounds(rounds + step);
+          else setReps((rec.reps || 0) + step);
+          return;
+        }
+        if (field === 'rounds') rec.rounds = clampInt(rec.rounds + step, 0, 999, rec.rounds);
+        else rec.reps = clampInt((rec.reps || 0) + step, 0, MAX_REPS, rec.reps || 0);
+        saveRecords();
+        refreshRows(id);
       }
       function bindStepper(input, minusBtnEl, plusBtnEl, setter, getter) {
         input.addEventListener('change', function () { setter(input.value); });
@@ -1439,6 +1545,7 @@
       function bestIds() {
         var bestByMin = {};
         records.forEach(function (r) {
+          if (!(r.rounds > 0) && !(r.reps > 0)) return;   // 0라운드 + 0회는 최고 기록 후보에서 뺀다
           var k = String(r.minutes || 20);
           if (!bestByMin[k] || better(r, bestByMin[k])) bestByMin[k] = r;
         });
@@ -1461,91 +1568,175 @@
         }
       }
       var openIds = {};   // 랩타임을 펼쳐 둔 기록 id (다시 그려도 유지)
+      var rowById = {};   // 기록 id → 목록 행의 요소 묶음 (값이 바뀌면 목록을 새로 만들지 않고 그 행만 고친다)
       function renderHistory() {
         historyList.innerHTML = '';
+        rowById = {};
         var best = bestIds();
         historyCount.textContent = records.length ? records.length + '회' : '';
         historyEmpty.hidden = records.length > 0;
         records.forEach(function (rec) {
-          var li = document.createElement('li');
-          var isBest = !!best[rec.id];
-          if (isBest) li.className = 'best';
+          var row = buildRow(rec.id);
+          rowById[rec.id] = row;
+          fillRow(row, rec);
+          markBest(row, rec, !!best[rec.id]);
+          historyList.appendChild(row.li);
+        });
+      }
+      // 행의 뼈대만 만든다. 랩 칩과 수정 스테퍼는 펼칠 때 채운다 (기록이 많아도 접힌 행은 가볍게)
+      function buildRow(id) {
+        var row = { id: id, star: null, avg: null, roundsVal: null, repsVal: null };
+        var li = row.li = document.createElement('li');
+        li.setAttribute('data-id', id);
 
-          var left = document.createElement('div');
-          var when = document.createElement('div');
-          when.className = 'when';
-          when.textContent = fmtDate(rec.date) + (rec.minutes && rec.minutes !== 20 ? ' · ' + rec.minutes + '분' : '');
-          left.appendChild(when);
-          if (isBest) {
-            var star = document.createElement('div');
-            star.style.fontSize = '0.75rem';
-            star.style.color = 'var(--amber)';
-            star.textContent = '★ 최고 기록' + (rec.minutes && rec.minutes !== 20 ? ' (' + rec.minutes + '분)' : '');
-            left.appendChild(star);
+        var left = row.left = document.createElement('div');
+        var when = row.when = document.createElement('div');
+        when.className = 'when';
+        left.appendChild(when);
+
+        var score = row.score = document.createElement('div');
+        score.className = 'score';
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'del';
+        del.textContent = '×';
+        del.setAttribute('aria-label', '기록 삭제');
+        del.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (!del.classList.contains('confirm')) {
+            del.classList.add('confirm');
+            del.textContent = '삭제?';
+            setTimeout(function () {
+              if (del.isConnected) { del.classList.remove('confirm'); del.textContent = '×'; }
+            }, 3000);
+            return;
           }
+          records = records.filter(function (r) { return r.id !== id; });
+          delete openIds[id];
+          if (id === currentRecordId) { currentRecordId = null; savePending(null); showResultCard(); }
+          saveRecords();
+          renderHistory();
+        });
 
-          var score = document.createElement('div');
-          score.className = 'score';
-          score.textContent = rec.rounds + 'R' + (rec.reps ? ' + ' + rec.reps : '');
-          var a = avgSplit(rec.splits);
-          if (a !== null) {
-            var avgEl = document.createElement('div');
-            avgEl.className = 'avg';
-            avgEl.textContent = '평균 ' + fmtDur(a) + '/R';
-            left.appendChild(avgEl);
+        var laps = row.laps = document.createElement('div');
+        laps.className = 'laps';
+
+        // 펼치면 랩타임 아래에 보이는 수정 스테퍼 (− 값 +)
+        var edit = row.edit = document.createElement('div');
+        edit.className = 'edit';
+        edit.addEventListener('click', function (e) {
+          e.stopPropagation();   // 스테퍼를 눌러도 항목이 접히거나 다른 동작으로 번지지 않게 한다
+          var b = e.target.closest ? e.target.closest('button[data-edit]') : null;
+          if (b) editRecord(id, b.getAttribute('data-edit'), parseInt(b.getAttribute('data-step'), 10));
+        });
+
+        if (openIds[id]) li.classList.add('open');
+        li.addEventListener('click', function () {
+          var on = li.classList.toggle('open');
+          var rec = recordById(id);
+          if (on) openIds[id] = true; else delete openIds[id];
+          if (on && rec) fillDetails(row, rec);
+          else laps.textContent = '';
+        });
+
+        li.appendChild(left);
+        li.appendChild(score);
+        li.appendChild(del);
+        li.appendChild(laps);
+        li.appendChild(edit);
+        return row;
+      }
+      // 행에 보이는 값(날짜·점수·평균)을 채운다. 펼쳐져 있으면 랩 칩과 스테퍼 값도 함께
+      function fillRow(row, rec) {
+        row.when.textContent = fmtDate(rec.date) + (rec.minutes && rec.minutes !== 20 ? ' · ' + rec.minutes + '분' : '');
+        row.score.textContent = rec.rounds + 'R' + (rec.reps ? ' + ' + rec.reps : '');
+        var a = avgSplit(usedSplits(rec.splits, rec.rounds));
+        if (a === null) {
+          if (row.avg) { row.left.removeChild(row.avg); row.avg = null; }
+        } else {
+          if (!row.avg) {
+            row.avg = document.createElement('div');
+            row.avg.className = 'avg';
+            row.left.appendChild(row.avg);
           }
-
-          var del = document.createElement('button');
-          del.type = 'button';
-          del.className = 'del';
-          del.textContent = '×';
-          del.setAttribute('aria-label', '기록 삭제');
-          del.addEventListener('click', function (e) {
-            e.stopPropagation();
-            if (!del.classList.contains('confirm')) {
-              del.classList.add('confirm');
-              del.textContent = '삭제?';
-              setTimeout(function () {
-                if (del.isConnected) { del.classList.remove('confirm'); del.textContent = '×'; }
-              }, 3000);
-              return;
-            }
-            records = records.filter(function (r) { return r.id !== rec.id; });
-            delete openIds[rec.id];
-            if (rec.id === currentRecordId) { currentRecordId = null; savePending(null); showResultCard(); }
-            saveRecords();
-            renderHistory();
+          row.avg.textContent = '평균 ' + fmtDur(a) + '/R';
+        }
+        if (row.li.classList.contains('open')) fillDetails(row, rec);
+      }
+      function markBest(row, rec, isBest) {
+        if (isBest === !!row.star) return;
+        row.li.classList.toggle('best', isBest);
+        if (isBest) {
+          row.star = document.createElement('div');
+          row.star.style.fontSize = '0.75rem';
+          row.star.style.color = 'var(--amber)';
+          row.star.textContent = '★ 최고 기록' + (rec.minutes && rec.minutes !== 20 ? ' (' + rec.minutes + '분)' : '');
+          row.left.insertBefore(row.star, row.when.nextSibling);
+        } else {
+          row.left.removeChild(row.star);
+          row.star = null;
+        }
+      }
+      // 펼친 행의 랩 칩과 수정 스테퍼
+      function fillDetails(row, rec) {
+        var laps = row.laps;
+        laps.textContent = '';
+        var list = usedSplits(rec.splits, rec.rounds);
+        if (list.length) {
+          var mm2 = minMax(list), lo = mm2[0], hi = mm2[1];
+          list.forEach(function (ms, i) {
+            var c = document.createElement('span');
+            c.textContent = 'R' + (i + 1) + ' ' + fmtDur(ms);
+            if (list.length > 1 && ms === lo) c.className = 'fast';
+            else if (list.length > 1 && ms === hi) c.className = 'slow';
+            laps.appendChild(c);
           });
-
-          var laps = document.createElement('div');
-          laps.className = 'laps';
-          var list = Array.isArray(rec.splits) ? rec.splits : [];
-          if (list.length) {
-            var mm2 = minMax(list), lo = mm2[0], hi = mm2[1];
-            list.forEach(function (ms, i) {
-              var c = document.createElement('span');
-              c.textContent = 'R' + (i + 1) + ' ' + fmtDur(ms);
-              if (list.length > 1 && ms === lo) c.className = 'fast';
-              else if (list.length > 1 && ms === hi) c.className = 'slow';
-              laps.appendChild(c);
-            });
-          } else {
-            var none = document.createElement('span');
-            none.className = 'none';
-            none.textContent = '랩타임 없음';
-            laps.appendChild(none);
-          }
-          if (openIds[rec.id]) li.classList.add('open');
-          li.addEventListener('click', function () {
-            var on = li.classList.toggle('open');
-            if (on) openIds[rec.id] = true; else delete openIds[rec.id];
+        } else {
+          var none = document.createElement('span');
+          none.className = 'none';
+          none.textContent = '랩타임 없음';
+          laps.appendChild(none);
+        }
+        if (!row.roundsVal) buildEdit(row);
+        row.roundsVal.textContent = rec.rounds;
+        row.repsVal.textContent = rec.reps || 0;
+      }
+      function buildEdit(row) {
+        [['rounds', '라운드'], ['reps', '추가 횟수']].forEach(function (f) {
+          var line = document.createElement('div');
+          line.className = 'row';
+          var lbl = document.createElement('span');
+          lbl.className = 'lbl';
+          lbl.textContent = f[1];
+          var st = document.createElement('div');
+          st.className = 'stepper';
+          var val = row[f[0] + 'Val'] = document.createElement('span');
+          val.className = 'val';
+          val.setAttribute('data-val', f[0]);
+          [[-1, '−'], [1, '+']].forEach(function (s) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.setAttribute('data-edit', f[0]);
+            b.setAttribute('data-step', s[0]);
+            b.setAttribute('aria-label', f[1] + ' ' + (s[0] < 0 ? '−1' : '+1'));
+            b.textContent = s[1];
+            st.appendChild(b);
+            if (s[0] < 0) st.appendChild(val);
           });
-
-          li.appendChild(left);
-          li.appendChild(score);
-          li.appendChild(del);
-          li.appendChild(laps);
-          historyList.appendChild(li);
+          line.appendChild(lbl);
+          line.appendChild(st);
+          row.edit.appendChild(line);
+        });
+      }
+      // 값이 바뀐 뒤: 목록을 새로 만들지 않고 그 행의 내용과 최고 기록 표시만 고친다
+      function refreshRows(id) {
+        var row = rowById[id], rec = recordById(id);
+        if (!row || !rec || !row.li.isConnected) { renderHistory(); return; }
+        fillRow(row, rec);
+        var best = bestIds();
+        records.forEach(function (r) {
+          if (rowById[r.id]) markBest(rowById[r.id], r, !!best[r.id]);
         });
       }
 
@@ -1562,6 +1753,13 @@
         function num(v) { return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) ? Number(v) : NaN; }
         var have = {};
         records.forEach(function (r) { have[r.id] = true; });
+        // id 없는 기록은 날짜·운동 시간·라운드·추가 횟수가 모두 같으면 같은 기록으로 본다 (가져올 때마다 쌓이지 않게)
+        function sigOf(time, mins, rnds, reps) { return time + '|' + mins + '|' + rnds + '|' + reps; }
+        var haveSig = {};
+        records.forEach(function (r) {
+          var t = new Date(r.date).getTime();
+          if (!isNaN(t)) haveSig[sigOf(t, clampInt(r.minutes, 1, 99, 20), clampInt(r.rounds, 0, 999, 0), clampInt(r.reps, 0, MAX_REPS, 0))] = true;
+        });
         var toAdd = [];
         var added = 0, skipped = 0, bad = 0, dropped = 0;
         var room = MAX_RECORDS - records.length;
@@ -1571,7 +1769,13 @@
           if (!isFinite(rnd)) { bad++; return; }
           var date = (typeof r.date === 'string' && !isNaN(new Date(r.date).getTime())) ? r.date : null;
           var givenId = num(r.id);
-          var id = (isFinite(givenId) && Math.abs(givenId) < 8.64e15) ? Math.round(givenId) : (date ? new Date(date).getTime() : Date.now());
+          var hasId = isFinite(givenId) && Math.abs(givenId) < 8.64e15;
+          var id = hasId ? Math.round(givenId) : (date ? new Date(date).getTime() : Date.now());
+          var mins = clampInt(r.minutes, 1, 99, 20);
+          var rnds = clampInt(rnd, 0, 999, 0);
+          var reps = clampInt(r.reps, 0, MAX_REPS, 0);
+          var sig = date ? sigOf(new Date(date).getTime(), mins, rnds, reps) : null;
+          if (!hasId && sig && haveSig[sig]) { skipped++; return; }
           while (have[id]) {
             if (givenId === id) { skipped++; return; }
             id += 1;
@@ -1581,17 +1785,19 @@
           toAdd.push({
             id: id,
             date: isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString(),
-            minutes: clampInt(r.minutes, 1, 99, 20),
-            rounds: clampInt(rnd, 0, 999, 0),
-            reps: clampInt(r.reps, 0, 999, 0),
+            minutes: mins,
+            rounds: rnds,
+            reps: reps,
             splits: Array.isArray(r.splits) ? r.splits.filter(function (n) { return typeof n === 'number' && isFinite(n) && n >= 0; }).slice(0, MAX_SPLITS) : []
           });
           have[id] = true;
+          if (sig) haveSig[sig] = true;
           added++;
         });
         records = records.concat(toAdd);
         records.sort(function (a, b) { return (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0); });
         var ok = saveRecords();
+        if (added) askPersist();
         renderHistory();
         if (state === 'done') showResultCard();
         return { added: added, skipped: skipped, bad: bad, dropped: dropped, saved: ok };
@@ -1862,7 +2068,14 @@
           if (state === 'idle' || wakeLock) { lock.release().catch(function () {}); return; }
           wakeLock = lock;
           lock.addEventListener('release', function () { if (wakeLock === lock) wakeLock = null; });
-        }).catch(function () { wakePending = false; });
+        }).catch(function () {
+          wakePending = false;
+          // 절전 모드 등으로 거부된 경우: 화면이 보이는 운동 중일 때만, 세션에 한 번 안내한다
+          if (!wakeWarned && document.visibilityState === 'visible' && (state === 'countdown' || state === 'running')) {
+            wakeWarned = true;
+            showToast('화면 켜짐 유지에 실패했습니다. 자동 잠금을 길게 설정해 두세요.', 6000);
+          }
+        });
       }
       function releaseWakeLock() {
         if (wakeReleaseTimer) { clearTimeout(wakeReleaseTimer); wakeReleaseTimer = null; }
@@ -1878,12 +2091,17 @@
       }
       document.addEventListener('visibilitychange', function () {
         if (document.visibilityState !== 'visible') return;
+        // 완료 화면인 채로 60분 넘게 지나 돌아왔으면 대기 화면으로 되돌린다 (기록은 목록에 남아 있다)
+        if (state === 'done' && Date.now() - doneAt > PENDING_MAX_AGE_MS) { reset(); return; }
         if (state === 'running') {
           ensureAudio();
           if (mediaWanted && silentEl.paused) unlockMedia();
           tick();
           if (state === 'running') { scheduleCues(); requestWakeLock(); }
-        } else if (state === 'paused' || state === 'countdown') {
+        } else if (state === 'paused') {
+          requestWakeLock();
+          scheduleWakeRelease(PAUSE_WAKE_GRACE_MS);   // requestWakeLock()이 지운 해제 타이머를 다시 건다
+        } else if (state === 'countdown') {
           requestWakeLock();
         }
         if (state === 'done' && pendingVibe) {
@@ -1920,11 +2138,13 @@
 
       // 키보드(데스크톱 확인용): Space = 라운드 +1 / Enter = 시작 / P = 일시정지 / Backspace = −1
       document.addEventListener('keydown', function (e) {
+        if (e.defaultPrevented) return;   // 설정 창 등 다른 핸들러가 이미 처리한 키
         var tag = (e.target && e.target.tagName) || '';
         if (tag === 'INPUT') return;
         if (modalOpen()) return;
         if (e.code === 'Space') { e.preventDefault(); if (state === 'running') addRound(performance.now()); }
-        else if (e.key === 'Enter' && state === 'idle') beginCountdown();
+        // preventDefault: 포커스가 남아 있는 버튼(취소·내보내기 등)이 같은 Enter로 눌리지 않게 한다
+        else if (e.key === 'Enter' && state === 'idle') { e.preventDefault(); beginCountdown(); }
         else if (e.key === 'Escape' && state === 'countdown') cancelCountdown();
         else if (e.key === 'p' || e.key === 'P') pauseBtn.click();
         else if (e.key === 'Backspace') undoRound();
@@ -1932,6 +2152,9 @@
 
       // ---------- 오프라인: 서비스워커 + 새 버전 확인 ----------
       var SW_CACHE = 'cindy-amrap-v1';   // sw.js의 CACHE와 같아야 한다
+      var UPDATE_CHECK_GAP_MS = 30 * 60 * 1000;   // 화면 복귀 때의 새 버전 확인 간격
+      var lastUpdateCheck = 0;                    // 서버본을 마지막으로 받아 확인한(성공한) 시각
+      var updateChecking = false;                 // 확인 요청이 진행 중인지 (겹쳐서 받지 않는다)
       var updateToastShown = false;
       var updateReady = false;
       function offerUpdate() {
@@ -1942,20 +2165,22 @@
       }
       // 서비스워커는 index.html을 캐시 우선으로 주므로, 페이지가 직접 서버 최신본과 비교해 캐시를 갱신하고 안내한다
       function checkForUpdate() {
-        if (!('caches' in window) || !/^https?:$/.test(location.protocol)) return;
+        if (updateChecking || !('caches' in window) || !/^https?:$/.test(location.protocol)) return;
+        updateChecking = true;
         var key = new URL('index.html', location.href).href;
         Promise.all([
           caches.open(SW_CACHE).then(function (c) { return c.match(key); }).then(function (r) { return r ? r.text() : null; }),
           fetch('index.html?fresh=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; })
         ]).then(function (pair) {
           var cached = pair[0], fresh = pair[1];
+          if (fresh) lastUpdateCheck = Date.now();
           if (!fresh || cached === fresh) return;
           return caches.open(SW_CACHE).then(function (c) {
             return c.put(key, new Response(fresh, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
           }).then(function () {
             if (cached !== null) offerUpdate();
           });
-        }).catch(function () {});
+        }).catch(function () {}).then(function () { updateChecking = false; });
       }
       if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
         window.addEventListener('load', function () {
@@ -1970,8 +2195,10 @@
             return navigator.serviceWorker.ready;
           }).then(function () { checkForUpdate(); }).catch(function () {});
         });
+        // 로드 때는 항상 한 번 확인하고, 그 뒤 화면 복귀 때는 마지막 성공 확인에서 30분이 지났을 때만 다시 받는다
         document.addEventListener('visibilitychange', function () {
-          if (document.visibilityState === 'visible' && (state === 'idle' || state === 'done')) checkForUpdate();
+          if (document.visibilityState !== 'visible' || (state !== 'idle' && state !== 'done')) return;
+          if (Date.now() - lastUpdateCheck >= UPDATE_CHECK_GAP_MS) checkForUpdate();
         });
       }
 
@@ -1987,6 +2214,10 @@
       if (pending !== null) {
         records.forEach(function (r) { if (r.id === pending) pendingRec = r; });
       }
+      // 완료 화면은 기록의 종료 시각(date)에서 60분까지만 복원한다. 지났으면 대기 화면으로 시작(기록은 목록에 남는다)
+      var pendingAt = pendingRec ? new Date(pendingRec.date).getTime() : NaN;
+      if (pendingRec && isNaN(pendingAt)) pendingAt = pendingRec.id;   // 날짜를 읽을 수 없으면 id(저장 시각)로 판단
+      if (pendingRec && Date.now() - pendingAt > PENDING_MAX_AGE_MS) pendingRec = null;
       var prog = loadProgress();
       if (prog) {
         // 실행 중이던 운동: 이어서 할지 묻는다 (오디오 해제를 위해 버튼 제스처가 필요)
@@ -2006,6 +2237,7 @@
       } else if (pendingRec) {
         // 완료 직후 페이지가 다시 열린 경우: 결과 화면을 복원해 횟수를 이어서 입력할 수 있게 한다
         currentRecordId = pendingRec.id;
+        doneAt = pendingAt;
         rounds = pendingRec.rounds;
         splits = Array.isArray(pendingRec.splits) ? pendingRec.splits.slice() : [];
         totalMs = (pendingRec.minutes || 20) * 60000;
