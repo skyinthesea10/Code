@@ -642,7 +642,7 @@
     /* 종료: 배경이 붉게 바뀌고 잠시 깜빡임 */
     body[data-state="done"] {
       background: #5a1a1f;
-      animation: doneFlash 0.6s ease-in-out 5 alternate;
+      animation: doneFlash 0.6s ease-in-out 6 alternate;   /* 짝수 번이어야 어두운 색에서 끝나 마지막에 색이 튀지 않는다 */
     }
     @keyframes doneFlash {
       from { background-color: #5a1a1f; }
@@ -1295,7 +1295,8 @@
         sfxTap();
         vibrate(18);
       }
-      function undoRound() {
+      // silent === true: 취소된 터치를 되돌릴 때처럼 효과음 없이 되돌린다
+      function undoRound(silent) {
         if (state !== 'running' && state !== 'paused') return;
         if (rounds <= 0) return;
         rounds -= 1;
@@ -1303,7 +1304,7 @@
         renderRounds();
         renderSplitInfo();
         saveProgress();
-        sfxUndo();
+        if (silent !== true) sfxUndo();
       }
       var flashTimer = null;
       function flash() {
@@ -1315,11 +1316,33 @@
       }
 
       // 화면 전체 탭: 컨트롤(data-nocount) 위가 아니면 라운드 +1
+      var tapPointerId = null;     // 방금 라운드를 올린 터치(마우스 제외). 취소로 끝나면 그 라운드를 되돌린다
+      var tapRounds = 0;           // 그 터치 직후의 라운드 수 (그 사이 다른 조작이 있었으면 되돌리지 않는다)
+      var tapPrevAt = -Infinity;   // 그 터치 전의 lastTapAt
       document.addEventListener('pointerdown', function (e) {
         if (state !== 'running') return;
         if (!e.isPrimary) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;   // 우클릭·휠클릭은 세지 않는다
         if (e.target && e.target.closest && e.target.closest('[data-nocount]')) return;
+        var before = rounds;
+        var prevAt = lastTapAt;
         addRound(performance.now());
+        if (rounds > before && e.pointerType !== 'mouse') {
+          tapPointerId = e.pointerId;
+          tapRounds = rounds;
+          tapPrevAt = prevAt;
+        }
+      }, { passive: true });
+      document.addEventListener('pointerup', function (e) {
+        if (e.pointerId === tapPointerId) tapPointerId = null;
+      }, { passive: true });
+      // 시스템 제스처 등으로 터치가 취소되면(pointercancel) 그 터치로 올라간 라운드를 소리 없이 되돌린다
+      document.addEventListener('pointercancel', function (e) {
+        if (e.pointerId !== tapPointerId) return;
+        tapPointerId = null;
+        if (rounds !== tapRounds) return;
+        undoRound(true);
+        if (rounds === tapRounds - 1) lastTapAt = tapPrevAt;   // 되돌린 탭이 다음 탭의 디바운스를 막지 않게
       }, { passive: true });
 
       // ---------- 버튼 ----------
@@ -1501,6 +1524,7 @@
       function bestIds() {
         var bestByMin = {};
         records.forEach(function (r) {
+          if (!(r.rounds > 0) && !(r.reps > 0)) return;   // 0라운드 + 0회는 최고 기록 후보에서 뺀다
           var k = String(r.minutes || 20);
           if (!bestByMin[k] || better(r, bestByMin[k])) bestByMin[k] = r;
         });
@@ -2032,11 +2056,13 @@
 
       // 키보드(데스크톱 확인용): Space = 라운드 +1 / Enter = 시작 / P = 일시정지 / Backspace = −1
       document.addEventListener('keydown', function (e) {
+        if (e.defaultPrevented) return;   // 설정 창 등 다른 핸들러가 이미 처리한 키
         var tag = (e.target && e.target.tagName) || '';
         if (tag === 'INPUT') return;
         if (modalOpen()) return;
         if (e.code === 'Space') { e.preventDefault(); if (state === 'running') addRound(performance.now()); }
-        else if (e.key === 'Enter' && state === 'idle') beginCountdown();
+        // preventDefault: 포커스가 남아 있는 버튼(취소·내보내기 등)이 같은 Enter로 눌리지 않게 한다
+        else if (e.key === 'Enter' && state === 'idle') { e.preventDefault(); beginCountdown(); }
         else if (e.key === 'Escape' && state === 'countdown') cancelCountdown();
         else if (e.key === 'p' || e.key === 'P') pauseBtn.click();
         else if (e.key === 'Backspace') undoRound();
@@ -2044,6 +2070,9 @@
 
       // ---------- 오프라인: 서비스워커 + 새 버전 확인 ----------
       var SW_CACHE = 'cindy-amrap-v1';   // sw.js의 CACHE와 같아야 한다
+      var UPDATE_CHECK_GAP_MS = 30 * 60 * 1000;   // 화면 복귀 때의 새 버전 확인 간격
+      var lastUpdateCheck = 0;                    // 서버본을 마지막으로 받아 확인한(성공한) 시각
+      var updateChecking = false;                 // 확인 요청이 진행 중인지 (겹쳐서 받지 않는다)
       var updateToastShown = false;
       var updateReady = false;
       function offerUpdate() {
@@ -2054,20 +2083,22 @@
       }
       // 서비스워커는 index.html을 캐시 우선으로 주므로, 페이지가 직접 서버 최신본과 비교해 캐시를 갱신하고 안내한다
       function checkForUpdate() {
-        if (!('caches' in window) || !/^https?:$/.test(location.protocol)) return;
+        if (updateChecking || !('caches' in window) || !/^https?:$/.test(location.protocol)) return;
+        updateChecking = true;
         var key = new URL('index.html', location.href).href;
         Promise.all([
           caches.open(SW_CACHE).then(function (c) { return c.match(key); }).then(function (r) { return r ? r.text() : null; }),
           fetch('index.html?fresh=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; })
         ]).then(function (pair) {
           var cached = pair[0], fresh = pair[1];
+          if (fresh) lastUpdateCheck = Date.now();
           if (!fresh || cached === fresh) return;
           return caches.open(SW_CACHE).then(function (c) {
             return c.put(key, new Response(fresh, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
           }).then(function () {
             if (cached !== null) offerUpdate();
           });
-        }).catch(function () {});
+        }).catch(function () {}).then(function () { updateChecking = false; });
       }
       if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
         window.addEventListener('load', function () {
@@ -2082,8 +2113,10 @@
             return navigator.serviceWorker.ready;
           }).then(function () { checkForUpdate(); }).catch(function () {});
         });
+        // 로드 때는 항상 한 번 확인하고, 그 뒤 화면 복귀 때는 마지막 성공 확인에서 30분이 지났을 때만 다시 받는다
         document.addEventListener('visibilitychange', function () {
-          if (document.visibilityState === 'visible' && (state === 'idle' || state === 'done')) checkForUpdate();
+          if (document.visibilityState !== 'visible' || (state !== 'idle' && state !== 'done')) return;
+          if (Date.now() - lastUpdateCheck >= UPDATE_CHECK_GAP_MS) checkForUpdate();
         });
       }
 
