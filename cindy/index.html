@@ -9,6 +9,13 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Cindy">
+  <meta name="description" content="크로스핏 Cindy용 20분 AMRAP 타이머 + 라운드 카운터. 화면 아무 곳이나 탭해 라운드를 세고, 랩타임과 기록을 기기에 저장합니다.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Cindy AMRAP">
+  <meta property="og:description" content="크로스핏 Cindy용 20분 AMRAP 타이머 + 라운드 카운터. 화면 아무 곳이나 탭해 라운드를 세고, 랩타임과 기록을 기기에 저장합니다.">
+  <meta property="og:url" content="https://skyinthesea10.github.io/Code/cindy/">
+  <meta property="og:image" content="https://skyinthesea10.github.io/Code/cindy/icon-512.png">
+  <meta property="og:locale" content="ko_KR">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -55,7 +62,7 @@
       overscroll-behavior: none;
       display: flex;
       flex-direction: column;
-      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);   /* 좌우는 가로 화면의 노치 대응 */
       transition: background-color 0.35s ease;
       /* 한글은 어절 단위로만 줄바꿈하고, 화면보다 긴 문자열만 예외로 끊는다 */
       word-break: keep-all;
@@ -1433,7 +1440,21 @@
         var rec = { id: id, date: new Date(when).toISOString(), minutes: runMinutes, rounds: r, reps: 0, splits: splits.slice() };
         records.unshift(rec);
         lastSaveOk = saveRecords();
+        askPersist();
         return rec.id;
+      }
+      // 기록을 처음 저장할 때(세션에 한 번) 브라우저에 저장소를 지우지 말아 달라고 요청한다. 지원하지 않거나 거부돼도 그대로 둔다
+      var persistAsked = false;
+      function askPersist() {
+        if (persistAsked) return;
+        persistAsked = true;
+        try {
+          var sm = navigator.storage;
+          if (!sm || !sm.persist) return;
+          var ask = function () { var p = sm.persist(); if (p && p.catch) p.catch(function () {}); };
+          if (!sm.persisted) { ask(); return; }
+          sm.persisted().then(function (already) { if (!already) ask(); }).catch(function () {});
+        } catch (e) {}
       }
       function showResultCard() {
         var rec = currentRecord();
@@ -1477,7 +1498,7 @@
         if (!rec) return;
         rounds = clampInt(v, 0, 999, rounds);
         renderRounds();
-        rec.rounds = rounds; saveRecords(); renderHistory();
+        rec.rounds = rounds; saveRecords(); refreshRows(rec.id);
         syncResultCard();
         document.title = '완료 ' + rounds + 'R · Cindy AMRAP';
       }
@@ -1485,7 +1506,7 @@
         var rec = currentRecord();
         if (!rec) return;
         var reps = clampInt(v, 0, MAX_REPS, rec.reps || 0);
-        rec.reps = reps; saveRecords(); renderHistory();
+        rec.reps = reps; saveRecords(); refreshRows(rec.id);
         finalReps.textContent = reps;
         repsInput.value = reps;
       }
@@ -1502,7 +1523,7 @@
         if (field === 'rounds') rec.rounds = clampInt(rec.rounds + step, 0, 999, rec.rounds);
         else rec.reps = clampInt((rec.reps || 0) + step, 0, MAX_REPS, rec.reps || 0);
         saveRecords();
-        renderHistory();
+        refreshRows(id);
       }
       function bindStepper(input, minusBtnEl, plusBtnEl, setter, getter) {
         input.addEventListener('change', function () { setter(input.value); });
@@ -1547,129 +1568,175 @@
         }
       }
       var openIds = {};   // 랩타임을 펼쳐 둔 기록 id (다시 그려도 유지)
+      var rowById = {};   // 기록 id → 목록 행의 요소 묶음 (값이 바뀌면 목록을 새로 만들지 않고 그 행만 고친다)
       function renderHistory() {
         historyList.innerHTML = '';
+        rowById = {};
         var best = bestIds();
         historyCount.textContent = records.length ? records.length + '회' : '';
         historyEmpty.hidden = records.length > 0;
         records.forEach(function (rec) {
-          var li = document.createElement('li');
-          li.setAttribute('data-id', rec.id);
-          var isBest = !!best[rec.id];
-          if (isBest) li.className = 'best';
+          var row = buildRow(rec.id);
+          rowById[rec.id] = row;
+          fillRow(row, rec);
+          markBest(row, rec, !!best[rec.id]);
+          historyList.appendChild(row.li);
+        });
+      }
+      // 행의 뼈대만 만든다. 랩 칩과 수정 스테퍼는 펼칠 때 채운다 (기록이 많아도 접힌 행은 가볍게)
+      function buildRow(id) {
+        var row = { id: id, star: null, avg: null, roundsVal: null, repsVal: null };
+        var li = row.li = document.createElement('li');
+        li.setAttribute('data-id', id);
 
-          var left = document.createElement('div');
-          var when = document.createElement('div');
-          when.className = 'when';
-          when.textContent = fmtDate(rec.date) + (rec.minutes && rec.minutes !== 20 ? ' · ' + rec.minutes + '분' : '');
-          left.appendChild(when);
-          if (isBest) {
-            var star = document.createElement('div');
-            star.style.fontSize = '0.75rem';
-            star.style.color = 'var(--amber)';
-            star.textContent = '★ 최고 기록' + (rec.minutes && rec.minutes !== 20 ? ' (' + rec.minutes + '분)' : '');
-            left.appendChild(star);
+        var left = row.left = document.createElement('div');
+        var when = row.when = document.createElement('div');
+        when.className = 'when';
+        left.appendChild(when);
+
+        var score = row.score = document.createElement('div');
+        score.className = 'score';
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'del';
+        del.textContent = '×';
+        del.setAttribute('aria-label', '기록 삭제');
+        del.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (!del.classList.contains('confirm')) {
+            del.classList.add('confirm');
+            del.textContent = '삭제?';
+            setTimeout(function () {
+              if (del.isConnected) { del.classList.remove('confirm'); del.textContent = '×'; }
+            }, 3000);
+            return;
           }
+          records = records.filter(function (r) { return r.id !== id; });
+          delete openIds[id];
+          if (id === currentRecordId) { currentRecordId = null; savePending(null); showResultCard(); }
+          saveRecords();
+          renderHistory();
+        });
 
-          var score = document.createElement('div');
-          score.className = 'score';
-          score.textContent = rec.rounds + 'R' + (rec.reps ? ' + ' + rec.reps : '');
-          var list = usedSplits(rec.splits, rec.rounds);
-          var a = avgSplit(list);
-          if (a !== null) {
-            var avgEl = document.createElement('div');
-            avgEl.className = 'avg';
-            avgEl.textContent = '평균 ' + fmtDur(a) + '/R';
-            left.appendChild(avgEl);
+        var laps = row.laps = document.createElement('div');
+        laps.className = 'laps';
+
+        // 펼치면 랩타임 아래에 보이는 수정 스테퍼 (− 값 +)
+        var edit = row.edit = document.createElement('div');
+        edit.className = 'edit';
+        edit.addEventListener('click', function (e) {
+          e.stopPropagation();   // 스테퍼를 눌러도 항목이 접히거나 다른 동작으로 번지지 않게 한다
+          var b = e.target.closest ? e.target.closest('button[data-edit]') : null;
+          if (b) editRecord(id, b.getAttribute('data-edit'), parseInt(b.getAttribute('data-step'), 10));
+        });
+
+        if (openIds[id]) li.classList.add('open');
+        li.addEventListener('click', function () {
+          var on = li.classList.toggle('open');
+          var rec = recordById(id);
+          if (on) openIds[id] = true; else delete openIds[id];
+          if (on && rec) fillDetails(row, rec);
+          else laps.textContent = '';
+        });
+
+        li.appendChild(left);
+        li.appendChild(score);
+        li.appendChild(del);
+        li.appendChild(laps);
+        li.appendChild(edit);
+        return row;
+      }
+      // 행에 보이는 값(날짜·점수·평균)을 채운다. 펼쳐져 있으면 랩 칩과 스테퍼 값도 함께
+      function fillRow(row, rec) {
+        row.when.textContent = fmtDate(rec.date) + (rec.minutes && rec.minutes !== 20 ? ' · ' + rec.minutes + '분' : '');
+        row.score.textContent = rec.rounds + 'R' + (rec.reps ? ' + ' + rec.reps : '');
+        var a = avgSplit(usedSplits(rec.splits, rec.rounds));
+        if (a === null) {
+          if (row.avg) { row.left.removeChild(row.avg); row.avg = null; }
+        } else {
+          if (!row.avg) {
+            row.avg = document.createElement('div');
+            row.avg.className = 'avg';
+            row.left.appendChild(row.avg);
           }
-
-          var del = document.createElement('button');
-          del.type = 'button';
-          del.className = 'del';
-          del.textContent = '×';
-          del.setAttribute('aria-label', '기록 삭제');
-          del.addEventListener('click', function (e) {
-            e.stopPropagation();
-            if (!del.classList.contains('confirm')) {
-              del.classList.add('confirm');
-              del.textContent = '삭제?';
-              setTimeout(function () {
-                if (del.isConnected) { del.classList.remove('confirm'); del.textContent = '×'; }
-              }, 3000);
-              return;
-            }
-            records = records.filter(function (r) { return r.id !== rec.id; });
-            delete openIds[rec.id];
-            if (rec.id === currentRecordId) { currentRecordId = null; savePending(null); showResultCard(); }
-            saveRecords();
-            renderHistory();
+          row.avg.textContent = '평균 ' + fmtDur(a) + '/R';
+        }
+        if (row.li.classList.contains('open')) fillDetails(row, rec);
+      }
+      function markBest(row, rec, isBest) {
+        if (isBest === !!row.star) return;
+        row.li.classList.toggle('best', isBest);
+        if (isBest) {
+          row.star = document.createElement('div');
+          row.star.style.fontSize = '0.75rem';
+          row.star.style.color = 'var(--amber)';
+          row.star.textContent = '★ 최고 기록' + (rec.minutes && rec.minutes !== 20 ? ' (' + rec.minutes + '분)' : '');
+          row.left.insertBefore(row.star, row.when.nextSibling);
+        } else {
+          row.left.removeChild(row.star);
+          row.star = null;
+        }
+      }
+      // 펼친 행의 랩 칩과 수정 스테퍼
+      function fillDetails(row, rec) {
+        var laps = row.laps;
+        laps.textContent = '';
+        var list = usedSplits(rec.splits, rec.rounds);
+        if (list.length) {
+          var mm2 = minMax(list), lo = mm2[0], hi = mm2[1];
+          list.forEach(function (ms, i) {
+            var c = document.createElement('span');
+            c.textContent = 'R' + (i + 1) + ' ' + fmtDur(ms);
+            if (list.length > 1 && ms === lo) c.className = 'fast';
+            else if (list.length > 1 && ms === hi) c.className = 'slow';
+            laps.appendChild(c);
           });
-
-          var laps = document.createElement('div');
-          laps.className = 'laps';
-          if (list.length) {
-            var mm2 = minMax(list), lo = mm2[0], hi = mm2[1];
-            list.forEach(function (ms, i) {
-              var c = document.createElement('span');
-              c.textContent = 'R' + (i + 1) + ' ' + fmtDur(ms);
-              if (list.length > 1 && ms === lo) c.className = 'fast';
-              else if (list.length > 1 && ms === hi) c.className = 'slow';
-              laps.appendChild(c);
-            });
-          } else {
-            var none = document.createElement('span');
-            none.className = 'none';
-            none.textContent = '랩타임 없음';
-            laps.appendChild(none);
-          }
-
-          // 펼치면 랩타임 아래에 보이는 수정 스테퍼 (− 값 +)
-          var edit = document.createElement('div');
-          edit.className = 'edit';
-          [['rounds', '라운드', rec.rounds], ['reps', '추가 횟수', rec.reps || 0]].forEach(function (f) {
-            var row = document.createElement('div');
-            row.className = 'row';
-            var lbl = document.createElement('span');
-            lbl.className = 'lbl';
-            lbl.textContent = f[1];
-            var st = document.createElement('div');
-            st.className = 'stepper';
-            var val = document.createElement('span');
-            val.className = 'val';
-            val.setAttribute('data-val', f[0]);
-            val.textContent = f[2];
-            [[-1, '−'], [1, '+']].forEach(function (s) {
-              var b = document.createElement('button');
-              b.type = 'button';
-              b.setAttribute('data-edit', f[0]);
-              b.setAttribute('data-step', s[0]);
-              b.setAttribute('aria-label', f[1] + ' ' + (s[0] < 0 ? '−1' : '+1'));
-              b.textContent = s[1];
-              st.appendChild(b);
-              if (s[0] < 0) st.appendChild(val);
-            });
-            row.appendChild(lbl);
-            row.appendChild(st);
-            edit.appendChild(row);
+        } else {
+          var none = document.createElement('span');
+          none.className = 'none';
+          none.textContent = '랩타임 없음';
+          laps.appendChild(none);
+        }
+        if (!row.roundsVal) buildEdit(row);
+        row.roundsVal.textContent = rec.rounds;
+        row.repsVal.textContent = rec.reps || 0;
+      }
+      function buildEdit(row) {
+        [['rounds', '라운드'], ['reps', '추가 횟수']].forEach(function (f) {
+          var line = document.createElement('div');
+          line.className = 'row';
+          var lbl = document.createElement('span');
+          lbl.className = 'lbl';
+          lbl.textContent = f[1];
+          var st = document.createElement('div');
+          st.className = 'stepper';
+          var val = row[f[0] + 'Val'] = document.createElement('span');
+          val.className = 'val';
+          val.setAttribute('data-val', f[0]);
+          [[-1, '−'], [1, '+']].forEach(function (s) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.setAttribute('data-edit', f[0]);
+            b.setAttribute('data-step', s[0]);
+            b.setAttribute('aria-label', f[1] + ' ' + (s[0] < 0 ? '−1' : '+1'));
+            b.textContent = s[1];
+            st.appendChild(b);
+            if (s[0] < 0) st.appendChild(val);
           });
-          edit.addEventListener('click', function (e) {
-            e.stopPropagation();   // 스테퍼를 눌러도 항목이 접히거나 다른 동작으로 번지지 않게 한다
-            var b = e.target.closest ? e.target.closest('button[data-edit]') : null;
-            if (b) editRecord(rec.id, b.getAttribute('data-edit'), parseInt(b.getAttribute('data-step'), 10));
-          });
-
-          if (openIds[rec.id]) li.classList.add('open');
-          li.addEventListener('click', function () {
-            var on = li.classList.toggle('open');
-            if (on) openIds[rec.id] = true; else delete openIds[rec.id];
-          });
-
-          li.appendChild(left);
-          li.appendChild(score);
-          li.appendChild(del);
-          li.appendChild(laps);
-          li.appendChild(edit);
-          historyList.appendChild(li);
+          line.appendChild(lbl);
+          line.appendChild(st);
+          row.edit.appendChild(line);
+        });
+      }
+      // 값이 바뀐 뒤: 목록을 새로 만들지 않고 그 행의 내용과 최고 기록 표시만 고친다
+      function refreshRows(id) {
+        var row = rowById[id], rec = recordById(id);
+        if (!row || !rec || !row.li.isConnected) { renderHistory(); return; }
+        fillRow(row, rec);
+        var best = bestIds();
+        records.forEach(function (r) {
+          if (rowById[r.id]) markBest(rowById[r.id], r, !!best[r.id]);
         });
       }
 
@@ -1686,6 +1753,13 @@
         function num(v) { return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) ? Number(v) : NaN; }
         var have = {};
         records.forEach(function (r) { have[r.id] = true; });
+        // id 없는 기록은 날짜·운동 시간·라운드·추가 횟수가 모두 같으면 같은 기록으로 본다 (가져올 때마다 쌓이지 않게)
+        function sigOf(time, mins, rnds, reps) { return time + '|' + mins + '|' + rnds + '|' + reps; }
+        var haveSig = {};
+        records.forEach(function (r) {
+          var t = new Date(r.date).getTime();
+          if (!isNaN(t)) haveSig[sigOf(t, clampInt(r.minutes, 1, 99, 20), clampInt(r.rounds, 0, 999, 0), clampInt(r.reps, 0, MAX_REPS, 0))] = true;
+        });
         var toAdd = [];
         var added = 0, skipped = 0, bad = 0, dropped = 0;
         var room = MAX_RECORDS - records.length;
@@ -1695,7 +1769,13 @@
           if (!isFinite(rnd)) { bad++; return; }
           var date = (typeof r.date === 'string' && !isNaN(new Date(r.date).getTime())) ? r.date : null;
           var givenId = num(r.id);
-          var id = (isFinite(givenId) && Math.abs(givenId) < 8.64e15) ? Math.round(givenId) : (date ? new Date(date).getTime() : Date.now());
+          var hasId = isFinite(givenId) && Math.abs(givenId) < 8.64e15;
+          var id = hasId ? Math.round(givenId) : (date ? new Date(date).getTime() : Date.now());
+          var mins = clampInt(r.minutes, 1, 99, 20);
+          var rnds = clampInt(rnd, 0, 999, 0);
+          var reps = clampInt(r.reps, 0, MAX_REPS, 0);
+          var sig = date ? sigOf(new Date(date).getTime(), mins, rnds, reps) : null;
+          if (!hasId && sig && haveSig[sig]) { skipped++; return; }
           while (have[id]) {
             if (givenId === id) { skipped++; return; }
             id += 1;
@@ -1705,17 +1785,19 @@
           toAdd.push({
             id: id,
             date: isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString(),
-            minutes: clampInt(r.minutes, 1, 99, 20),
-            rounds: clampInt(rnd, 0, 999, 0),
-            reps: clampInt(r.reps, 0, MAX_REPS, 0),
+            minutes: mins,
+            rounds: rnds,
+            reps: reps,
             splits: Array.isArray(r.splits) ? r.splits.filter(function (n) { return typeof n === 'number' && isFinite(n) && n >= 0; }).slice(0, MAX_SPLITS) : []
           });
           have[id] = true;
+          if (sig) haveSig[sig] = true;
           added++;
         });
         records = records.concat(toAdd);
         records.sort(function (a, b) { return (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0); });
         var ok = saveRecords();
+        if (added) askPersist();
         renderHistory();
         if (state === 'done') showResultCard();
         return { added: added, skipped: skipped, bad: bad, dropped: dropped, saved: ok };
